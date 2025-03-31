@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synonim"
+version = "0.1.0"
+description = "Tool for designing synthetic microbial communities"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Benjamin Coltman", email = "benjamin.coltman@univie.ac.at"}
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas"
+]
+keywords = ["microbial community", "SynCom", "synthetic communities", "environmental biotechnology"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics"
+]
+
+[project.urls]
+Homepage = "https://github.com/bcoltman/synonim"
+Documentation = "https://synonim.readthedocs.io"
+Source = "https://github.com/bcoltman/synonim"
+Tracker = "https://github.com/bcoltman/synonim/issues"
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "isort", "mypy"]
