@@ -12,3 +12,5 @@ from synonim.core import (
 
 )
 
+from synonim import io
+

@@ -14,7 +14,9 @@ authors = [
 requires-python = ">=3.8"
 dependencies = [
     "numpy",
-    "pandas"
+    "pandas", 
+    "gurobipy",
+    "scipy"
 ]
 keywords = ["microbial community", "SynCom", "synthetic communities", "environmental biotechnology"]
 
@@ -34,3 +36,9 @@ Tracker = "https://github.com/bcoltman/synonim/issues"
 
 [project.optional-dependencies]
 dev = ["pytest", "black", "isort", "mypy"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "serial",
+]

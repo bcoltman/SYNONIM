@@ -1,0 +1,1 @@
+from synonim.io.dataframe import model_from_frames

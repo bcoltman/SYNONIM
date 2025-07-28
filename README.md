@@ -3,12 +3,13 @@
 **SYNONIM**  
 *SYNthetic cOmmunity desigN via approxIMation*
 
-SYNONIM is a modular, object-oriented Python framework for designing synthetic microbial communities (SynComs). It enables researchers to translate high-dimensional genomic or functional data into optimized community designs, using both exact and heuristic optimization methods — all within a unified data and result representation system.
+SYNONIM is a modular framework for designing synthetic microbial communities (SynComs). It enables researchers to translate high-dimensional genomic or functional data into optimized community design.
 
+SYNONIM is currently in active development. Updates, detailed usage instructions and test cases will be released in due course.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 - Select optimal combinations of isolates based on functional profiles
 - Incorporate metadata (e.g. taxonomy) as constraints during optimization
@@ -17,7 +18,7 @@ SYNONIM is a modular, object-oriented Python framework for designing synthetic m
 
 ---
 
-## 📦 Installation
+## Installation
 
 > SYNONIM will be available via PyPI and conda-forge.  
 > For development use:
