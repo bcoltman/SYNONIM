@@ -259,7 +259,7 @@ class BinaryOptimizer(BaseOptimizer):
             results["BA"] = (results["TPR/recall"] + results["TNR/specificity"]) / 2
             results["F1_score"] = (2 * results["PPV/precision"] *results["TPR/recall"])/ (results["PPV/precision"] + results["TPR/recall"])
             
-            p1 = np.sqrt(results["TPR/recall"] * results["TNR/specificity"] * results["precision"] * results["NPV"])
+            p1 = np.sqrt(results["TPR/recall"] * results["TNR/specificity"] * results["PPV/precision"] * results["NPV"])
             p2 = np.sqrt(results["FNR"] * results["FPR"] * results["FOR"] * results["FDR"])
             results["MCC"] =  p1 - p2
             

@@ -6,6 +6,8 @@ from multiprocessing import Pool
 from typing import Any, Dict, List, Optional, Tuple, Union
 from scipy.optimize import minimize
 
+import time
+
 from threadpoolctl import threadpool_limits
 
 from synonim.core import Profile, Model
@@ -973,7 +975,8 @@ class AbundanceGenetic(AbundanceOptimizer):
         -------
         Solution or List[Solution]
             Solution objects containing final selections and metrics.
-        """
+        """           
+            
         num_features, num_scenarios = self.M.shape
         tasks = [(self, self.M[:, i], i) for i in range(num_scenarios)]
         with Pool(processes=self.processes) as pool: #initializer=set_single_thread
@@ -984,6 +987,6 @@ class AbundanceGenetic(AbundanceOptimizer):
             logger.info(
                 f"Target {i}: GA completed after {sol.details['generations_run']} generations with best fitness {sol.objective:.4f}"
             )
-        result: Union[Solution, List[Solution]] = solutions[0] if s == 1 else solutions
+        result: Union[Solution, List[Solution]] = solutions[0] if num_scenarios == 1 else solutions
         self.result = result
         return result

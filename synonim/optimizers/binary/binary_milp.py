@@ -138,8 +138,7 @@ class BinaryMILP(BinaryOptimizer):
         
         model_gp = gp.Model("MILP")
         # Set Gurobi solver parameters.
-        model_gp.Params.LogToConsole = 0
-        model_gp.Params.LogFile = ''  
+        
         model_gp.Params.Threads = self.processes
         model_gp.Params.Seed = 42
         model_gp.Params.Presolve = 0
@@ -419,5 +418,3 @@ class BinaryMILP(BinaryOptimizer):
         # (this re‑runs _initialize_base_model and _initialize_scenarios)
         #
         print("Gurobi model is not-pickleable and will need to either be re-initialised or loaded from other files")
-        # self.model_gp, self.variables = self._initialize_base_model()
-        # self._initialize_scenarios()

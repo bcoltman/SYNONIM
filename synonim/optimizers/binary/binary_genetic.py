@@ -116,7 +116,7 @@ class BinaryGenetic(BinaryOptimizer):
         tournament_size: int = 10,
         seed: int = 42,
         weighted: bool = False,
-        exploration_rate: float = 0.1
+        exploration_rate: float = 0.2
     ) -> None:
         """
         Initialize the BinaryGenetic optimizer.
@@ -191,37 +191,34 @@ class BinaryGenetic(BinaryOptimizer):
         # So:
         num_genomes = self.G.shape[1]
         
-        # Generate unified taxonomy matrix if taxonomy constraints and labels are provided.
         if self.taxonomy_constraints is not None and self.genome_labels is not None:
+            # Build the unified taxonomy matrix (rows = taxa, cols = genomes).
             self.T_unified, self.unified_taxon_to_index = generate_unified_taxonomy_matrix(
                 self.genome_labels, taxonomic_levels
             )
-            # Convert to CSC and precompute per‐taxon → list of genomes
             self.Tcsc = self.T_unified.tocsc()
             num_taxa_levels, _ = self.T_unified.shape
             
-            # Precompute a dense (taxa × genomes) matrix for fast indexing:
+            # Precompute dense arrays for fast indexing.
             self.taxonomy_matrix_dense = self.T_unified.T.toarray().astype(int)
-
             
-            # A zero‐vector to use when "no genome is removed"
+            # Vector of zeros used when no genome is removed.
             self._zero_removal = np.zeros(num_taxa_levels, dtype=int)
             
-            # Build a dense mapping: for each taxon‐row i, which genomes belong?
-            self.taxon_to_genomes = [self.T_unified.getrow(i).indices
-                                     for i in range(num_taxa_levels)]
-            # For each genome j, which taxon‐rows does it belong to?
-            self.genome_to_taxa = [self.Tcsc.getcol(j).indices
-                                   for j in range(num_genomes)]
-            # Build _min_counts, _max_counts, _exact_counts arrays (shape = #taxa)
+            # Precompute mappings: taxon → genomes, genome → taxa.
+            self.taxon_to_genomes = [self.T_unified.getrow(i).indices for i in range(num_taxa_levels)]
+            self.genome_to_taxa = [self.Tcsc.getcol(j).indices for j in range(num_genomes)]
+            
+            # Arrays to store min, max, and exact per-taxon requirements.
             self._min_counts = np.zeros(num_taxa_levels, dtype=float)
             self._max_counts = np.full(num_taxa_levels, np.inf, dtype=float)
             self._exact_counts = np.full(num_taxa_levels, np.nan, dtype=float)
             
-            # Populate them from taxonomy_constraints (same logic as AbundanceGenetic)
+            # Populate arrays from taxonomy_constraints.
+            # For "exact", we set min=max=exact so that all logic treats it as a hard requirement.
             for level, rules in self.taxonomy_constraints.items():
                 default_rules = rules.get("default", {})
-                # 1) Handle all explicit taxa:
+                # Handle explicitly defined taxa.
                 for taxon, cons in rules.items():
                     if taxon == "default":
                         continue
@@ -229,19 +226,30 @@ class BinaryGenetic(BinaryOptimizer):
                     idx = self.unified_taxon_to_index.get(key)
                     if idx is None:
                         continue
-                    self._min_counts[idx] = cons.get("min", self._min_counts[idx])
-                    self._max_counts[idx] = cons.get("max", self._max_counts[idx])
                     if "exact" in cons:
-                        self._exact_counts[idx] = cons["exact"]
-                # 2) Now apply default rules to any other taxa at this level:
+                        val = float(cons["exact"])
+                        self._exact_counts[idx] = val
+                        self._min_counts[idx] = val
+                        self._max_counts[idx] = val
+                    else:
+                        self._min_counts[idx] = cons.get("min", self._min_counts[idx])
+                        self._max_counts[idx] = cons.get("max", self._max_counts[idx])
+                # Apply default rules to all other taxa at this level.
                 for composite_key, idx in self.unified_taxon_to_index.items():
                     lvl, t = composite_key.split("-", 1)
                     if lvl != level or t in rules:
                         continue
-                    if "min" in default_rules:
-                        self._min_counts[idx] = default_rules["min"]
-                    if "max" in default_rules:
-                        self._max_counts[idx] = default_rules["max"]
+                    if "exact" in default_rules:
+                        val = float(default_rules["exact"])
+                        self._exact_counts[idx] = val
+                        self._min_counts[idx] = val
+                        self._max_counts[idx] = val
+                    else:
+                        if "min" in default_rules:
+                            self._min_counts[idx] = default_rules["min"]
+                        if "max" in default_rules:
+                            self._max_counts[idx] = default_rules["max"]
+        
         else:
             # No taxonomy constraints → create “dummy” arrays of length 0 so
             # np.isnan(self._exact_counts) still works when needed.
@@ -263,7 +271,9 @@ class BinaryGenetic(BinaryOptimizer):
             
             # A zero‐vector of length 0 to use when "no genome is removed"
             self._zero_removal = np.zeros(0, dtype=int)
-            
+        
+        self.validate_constraints(self.consortia_size)
+        
     def __getstate__(self) -> dict:
         """
         Customize pickling by removing non-pickleable objects.
@@ -294,42 +304,144 @@ class BinaryGenetic(BinaryOptimizer):
         parts.append(f"AMR-{self.absence_match_reward}")
         return "_".join(parts)
     
+    def validate_constraints(self, consortia_size: int) -> None:
+        """
+        Recursively validate hierarchical taxonomy constraints.
+        
+        Starting from the top level, check that exact/min/max allocations
+        can be satisfied within the given consortia size. For sub-levels,
+        recurse into each constrained taxon with its allocated share.
+        
+        Raises
+        ------
+        ValueError if the constraints are globally infeasible.
+        """
+        
+        def check_level(level: str, size: int) -> None:
+            """
+            Validate constraints at one level of the hierarchy.
+            
+            Parameters
+            ----------
+            level : str
+                Taxonomic level name (e.g. "domain", "phylum").
+            size : int
+                Number of genomes allocated to this level (from parent).
+            """
+            # Collect indices of all taxa at this level
+            taxa = [(key.split("-", 1)[1], idx)
+                    for key, idx in self.unified_taxon_to_index.items()
+                    if key.startswith(f"{level}-")]
+                        
+            if not taxa:
+                return  # nothing to check
+                
+            exact_sum = 0
+            min_sum = 0
+            max_sum = 0
+            unconstrained = False
+            
+            for taxon, idx in taxa:
+                ex = self._exact_counts[idx]
+                mi = self._min_counts[idx]
+                ma = self._max_counts[idx]
+                
+                if not np.isnan(ex):
+                    exact_sum += int(ex)
+                else:
+                    min_sum += int(mi)
+                    if np.isfinite(ma):
+                        max_sum += int(ma)
+                    else:
+                        unconstrained = True
+                        
+            if exact_sum > size:
+                raise ValueError(
+                    f"Infeasible {level}-level constraints: exact={exact_sum} > allocated={size}"
+                )
+                
+            lower = exact_sum + min_sum
+            if size < lower:
+                raise ValueError(
+                    f"Infeasible {level}-level constraints: require ≥{lower}, allocated={size}"
+                )
+                
+            if not unconstrained:
+                upper = exact_sum + max_sum
+                if size > upper:
+                    raise ValueError(
+                        f"Infeasible {level}-level constraints: allow ≤{upper}, allocated={size}"
+                    )
+                    
+            # --- Recurse into sub-levels ---
+            # For each exact taxon, its size is fixed = exact.
+            # For others, we can only validate local min/max bounds.
+            for taxon, idx in taxa:
+                ex = self._exact_counts[idx]
+                if not np.isnan(ex):
+                    # Recurse with fixed allocation
+                    sub_level = self._next_level(level)
+                    if sub_level is not None:
+                        check_level(sub_level, int(ex))
+                        
+        # Kick off recursion from the topmost level
+        if self.taxonomic_levels:
+            check_level(self.taxonomic_levels[0], consortia_size)
+            
+    def _next_level(self, level: str) -> Optional[str]:
+        """
+        Return the next taxonomic level after the given one,
+        or None if this is the deepest level.
+        """
+        if self.taxonomic_levels is None:
+            return None
+        try:
+            idx = self.taxonomic_levels.index(level)
+            if idx + 1 < len(self.taxonomic_levels):
+                return self.taxonomic_levels[idx + 1]
+        except ValueError:
+            pass
+        return None
+                    
     def _can_transition_batch(
         self,
-        current_counts: np.ndarray,          # shape = (#taxa,)
-        candidates_to_add: np.ndarray,       # list of genome‐indices to test
-        genome_to_remove: Optional[int],     # set to None if we’re only adding
-        slots_left: int                       # how many more slots remain after this add
+        current_counts: np.ndarray,
+        candidates_to_add: np.ndarray,
+        genome_to_remove: Optional[int],
+        slots_left: int
     ) -> np.ndarray:
         """
-        Return a boolean array (len = len(candidates_to_add)). True at i if
-        adding candidates_to_add[i] to the current set (and removing `genome_to_remove`
-        if not None) keeps all counts ≤ max AND allows meeting all min in the
-        remaining slots_left slots.
+        Return a boolean array (len = len(candidates_to_add)).
+        True at position i if adding candidates_to_add[i] (and optionally
+        removing genome_to_remove) keeps the current selection within
+        feasible bounds.
+        
+        Feasibility here means:
+          - All taxon counts remain ≤ max (including exact-as-max).
+          - There are still enough slots left to meet all min (including exact-as-min).
         """
-        # Dense ndarray of shape (#candidates_to_add, #taxa) giving the taxon‐row contributions
+        # Contribution of genomes we may add.
         adds = self.taxonomy_matrix_dense[candidates_to_add, :]
-        # adds = self.T_unified[candidates_to_add, :].toarray()  # shape = (k, #taxa)
-        if genome_to_remove is None:
-            remove = self._zero_removal
-        else:
-            remove = self.taxonomy_matrix_dense[genome_to_remove, :]
-            
-        # New counts if we add each candidate and remove (if specified)
-        # new_counts shape = (k, #taxa)
+        
+        # Contribution of genome we may remove (or zero-vector if none).
+        remove = self._zero_removal if genome_to_remove is None else self.taxonomy_matrix_dense[genome_to_remove, :]
+        
+        # New counts per taxon if we add/remove these genomes.
         new_counts = current_counts[None, :] + adds - remove[None, :]
         
-        # Check “≤ max” constraint
-        within_max = np.all(new_counts <= self._max_counts[None, :], axis=1)
+        # Effective min/max already include "exact" cases.
+        eff_min = self._min_counts[None, :]
+        eff_max = self._max_counts[None, :]
         
-        # Check if, after adding, we can still fill min requirements in the leftover slots
-        # Underflow = max(0, min_counts - new_counts). We sum how many “shortfall” remain.
-        shortfall = np.clip(self._min_counts[None, :] - new_counts, 0, None)
-        # If sum_of_shortfall ≤ slots_left, we can conceivably fill those min needs
+        # Check ≤ max for each candidate.
+        within_max = np.all(new_counts <= eff_max, axis=1)
+        
+        # Check if remaining slots could still fill deficits in min requirements.
+        shortfall = np.clip(eff_min - new_counts, 0, None)
         can_fill = shortfall.sum(axis=1) <= slots_left
         
         return within_max & can_fill
-
+        
     def individual_to_binary(self, individual: np.ndarray, total_candidates: int) -> np.ndarray:
         """
         Convert an individual (array of candidate indices) to a binary selection vector.
@@ -683,67 +795,89 @@ class BinaryGenetic(BinaryOptimizer):
                             if "min" in default_cons and count < default_cons["min"]:
                                 penalty += self.penalty_factor * (default_cons["min"] - count)
         return penalty
-        
+    
     def repair_individual(self, individual: np.ndarray, candidates: np.ndarray) -> np.ndarray:
         """
-        Final check to guarantee feasibility. In principle, every child
-        from crossover/mutation should already be feasible; here we do a
-        quick one-shot repair if anything slipped through.
+        Final check to guarantee feasibility of an individual.
+        
+        Strategy:
+          1) If already feasible (respecting min/max/exact), return unchanged.
+          2) Otherwise:
+             a) Remove excess genomes from overrepresented taxa.
+             b) Add genomes from underrepresented taxa until target counts are met.
+             c) Trim back to consortia_size if we overshot.
         """
-        # Build mask & current counts
         num_genomes = candidates.shape[1]
         mask = np.zeros(num_genomes, dtype=int)
         mask[individual] = 1
         counts = self.T_unified.dot(mask)
         
-        # If no violation, return as-is
-        if np.all(counts >= self._min_counts) and np.all(counts <= self._max_counts) and np.all(
+        # Effective bounds, with "exact" treated as both min and max.
+        eff_min = self._min_counts.copy()
+        eff_max = self._max_counts.copy()
+        target = np.where(np.isnan(self._exact_counts), counts, self._exact_counts)
+        
+        # If already feasible, nothing to do.
+        if np.all(counts >= eff_min) and np.all(counts <= eff_max) and np.all(
             np.isnan(self._exact_counts) | (counts == self._exact_counts)
         ):
             return individual
-            
-        # Otherwise, do a one-shot repair exactly like AbundanceGenetic
-        genomes = list(individual)
-        # Compute deficits/excesses
-        excess = counts - self._max_counts
-        deficit = self._min_counts - counts
         
-        # 1) Remove any excess
+        genomes = list(individual)
+        
+        # --- Step 1: Remove excess genomes (over target or over max). ---
+        excess = counts - np.minimum(target, eff_max)
         for tax_idx in np.where(excess > 0)[0]:
             remove_count = int(excess[tax_idx])
-            positions = [ i for i, g in enumerate(genomes)
-                          if tax_idx in self.genome_to_taxa[g] ]
+            # Candidate positions in the genome list that contribute to this taxon.
+            positions = [i for i, g in enumerate(genomes) if tax_idx in self.genome_to_taxa[g]]
+            # Remove enough of them to fix the excess.
             for pos in random.sample(positions, min(remove_count, len(positions))):
                 old = genomes[pos]
-                # pick a candidate from any taxon with deficit
-                deficits = np.where(deficit > 0)[0]
-                if deficits.size == 0:
-                    continue
-                # pool of genomes from underrepresented taxa, excluding already‐chosen
-                candidates_to_add = np.concatenate([ self.taxon_to_genomes[d] for d in deficits ])
-                pool = np.setdiff1d(candidates_to_add, genomes, assume_unique=True)
+                # Prefer replacements from taxa with deficits.
+                deficit = np.maximum(np.maximum(eff_min, target) - counts, 0)
+                deficit_taxa = np.where(deficit > 0)[0]
+                if deficit_taxa.size == 0:
+                    pool = np.setdiff1d(np.arange(num_genomes), genomes, assume_unique=True)
+                else:
+                    pool = np.setdiff1d(
+                        np.concatenate([self.taxon_to_genomes[t] for t in deficit_taxa]),
+                        genomes,
+                        assume_unique=True
+                    )
                 if pool.size == 0:
                     continue
-                newg = int(np.random.choice(pool))
+                feasible = pool[self._can_transition_batch(counts, pool, old, 0)]
+                if feasible.size == 0:
+                    continue
+                newg = int(np.random.choice(feasible))
                 genomes[pos] = newg
-                counts += self.T_unified[newg, :].toarray().ravel()
-                counts -= self.T_unified[old, :].toarray().ravel()
-                excess = counts - self._max_counts
-                deficit = self._min_counts - counts
+                counts += self.taxonomy_matrix_dense[newg] - self.taxonomy_matrix_dense[old]
                 
-        # 2) Fill any remaining deficits
+        # --- Step 2: Add genomes to fill deficits. ---
+        deficit = np.maximum(np.maximum(eff_min, target) - counts, 0)
         for tax_idx in np.where(deficit > 0)[0]:
-            needed = int(deficit[tax_idx])
+            need = int(deficit[tax_idx])
             pool = np.setdiff1d(self.taxon_to_genomes[tax_idx], genomes, assume_unique=True)
-            picks = np.random.choice(pool, size=min(needed, pool.size), replace=False)
+            feasible = pool[self._can_transition_batch(counts, pool, None, 0)]
+            picks = np.random.choice(feasible, size=min(need, feasible.size), replace=False) if feasible.size > 0 else []
             for g in picks:
                 genomes.append(int(g))
-                counts += self.T_unified[g, :].toarray().ravel()
-                deficit = self._min_counts - counts
+                counts += self.taxonomy_matrix_dense[g]
                 
-        # Trim back to consortia_size if we added too many
-        repaired = np.array(genomes[:len(individual)], dtype=int)
-        return repaired
+        # --- Step 3: Trim back to original size if too many genomes were added. ---
+        while len(genomes) > len(individual):
+            over = counts - target
+            over_taxa = np.where(over > 0)[0]
+            # Choose genomes that belong to overrepresented taxa preferentially.
+            removable_pos = [i for i, g in enumerate(genomes) if any(t in self.genome_to_taxa[g] for t in over_taxa)]
+            if not removable_pos:
+                removable_pos = list(range(len(genomes)))
+            pos = random.choice(removable_pos)
+            g = genomes.pop(pos)
+            counts -= self.taxonomy_matrix_dense[g]
+            
+        return np.array(genomes, dtype=int)
         
     def evaluate_population_fitness(
         self, T: np.ndarray, W: np.ndarray, candidates: np.ndarray, population: np.ndarray
@@ -881,21 +1015,36 @@ class BinaryGenetic(BinaryOptimizer):
             
             # Combine offspring and exploration for next generation
             population = np.vstack((new_population, exploration_population))
-            
-        # Final evaluation after GA loop.
+        
+        # --- Final evaluation after GA loop ---
         fitness = self.evaluate_population_fitness(T, W, candidates, population)
-        best_idx = np.argmax(fitness)
-        best_individual = population[best_idx]
-        pop_candidates = candidates[:, best_individual]
-        combined = np.bitwise_or.reduce(pop_candidates, axis=1)
-        matches = int(np.sum(combined == T))
-        mismatches = T.shape[0] - matches
         
-        X_opt = np.zeros(total_candidates, dtype=int)
-        X_opt[best_individual] = 1
+        # Add feasible individuals from the final population into the archive.
+        for i, indiv in enumerate(population):
+            if self.evaluate_taxonomy_penalty(indiv) == 0:
+                binary = self.individual_to_binary(indiv, total_candidates)
+                mask_key = tuple(binary.tolist())
+                if mask_key not in seen_masks:
+                    seen_masks.add(mask_key)
+                    archive_rows.append(sp.csr_matrix(binary))
+                    archive_scores.append(fitness[i])
         
+        # Convert archive lists to arrays/matrices if not empty.
         archive_solutions = sp.vstack(archive_rows) if archive_rows else None
         archive_scores_arr = np.array(archive_scores) if archive_scores else None
+        
+        # Prefer the best feasible archived solution (archive now includes final population).
+        if archive_solutions is not None and archive_solutions.shape[0] > 0:
+            best_arch_idx = int(np.argmax(archive_scores_arr))
+            X_opt = archive_solutions[best_arch_idx].toarray().ravel().astype(int)
+            best_fitness = float(archive_scores_arr[best_arch_idx])
+            best_individual = np.where(X_opt == 1)[0]
+        else:
+            # Fallback: no feasible individuals found at all (archive empty).
+            best_idx = np.argmax(fitness)
+            best_individual = population[best_idx]
+            X_opt = np.zeros(total_candidates, dtype=int)
+            X_opt[best_individual] = 1
         
         analysis_metrics = self.analyze_solution(T, X_opt)
         # details["analysis"] = analysis_metrics
