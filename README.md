@@ -37,7 +37,7 @@ Use SYNONIM to:
 
 * **Objective-driven optimization**: Pick mathematical or biologically meaningful objectives (e.g., weight certain functions, ensure certain taxa included)
 * **Constraint integration**: Enforce taxonomic, phylogenetic, environmental, or metadata-based constraints
-* **Modular components**: Swap optimization algorithms (genetic algorithms, simulated annealing, MILP)
+* **Modular components**: Swap optimization algorithms (genetic algorithms, MILP)
 
 ---
 
@@ -233,42 +233,6 @@ SYNONIM defines three core classes for programmatic model construction:
       time_limit=86400
   )
   solutions = milp.optimize()
-  ```
-
-### Abundance Optimizers
-
-* **AbundanceGenetic**: Optimizes consortia using abundance profiles within fractional bounds.
-  **Parameters**: `model`, `f_bounds`, `consortia_size`, `taxonomy_constraints`, `taxonomic_levels`, `population_size`, `generations`, `processes`.
-  **Usage**:
-
-  ```python
-  ab_opt = AbundanceGenetic(
-      model=model,
-      f_bounds=(0.2, 0.2),
-      consortia_size=5,
-      taxonomy_constraints=tax_constraints,
-      taxonomic_levels=["domain", "genus"],
-      population_size=1000,
-      generations=200,
-      processes=4
-  )
-  solutions = ab_opt.optimize()
-  ```
-
-* **AbundanceMINLP**: Mixed‑Integer Non‑Linear Programming solver for abundance‑based design.
-  **Parameters**: `model`, `f_bounds`, `consortia_size`, `taxonomy_constraints`, `taxonomic_levels`, `processes`, `time_limit`.
-  **Usage**:
-
-  ```python
-  minlp = AbundanceMINLP(
-      model=model,
-      f_bounds=(0.2, 0.2),
-      consortia_size=5,
-      taxonomy_constraints=tax_constraints,
-      taxonomic_levels=["domain", "genus"],
-      time_limit=432000
-  )
-  solutions = minlp.optimize()
   ```
 
 ## Testing
