@@ -238,7 +238,8 @@ class BinaryHeuristic(BinaryOptimizer):
             elapsed_time = time.time() - start_time
             
             # Create a Solution object with pick scores and analysis details.
-            sol = Solution(method=self.descriptive_name,
+            sol = Solution(name=self.metagenome_names[sample_idx],
+                           method=self.descriptive_name,
                            X_opt=X_opt[:, sample_idx],
                            objective=objective_value,
                            genome_names=self.genome_names,

@@ -50,6 +50,8 @@ class BaseOptimizer(ABC):
         """
         self.model = model
         
+        self.metagenome_names = self.model.metagenome_names
+        
         self.genome_names = self.model.genome_names
         
         self.consortia_size = consortia_size
@@ -291,9 +293,61 @@ class BinaryOptimizer(BaseOptimizer):
                         selected_taxa.setdefault(level, {}).setdefault(taxon, 0)
                         selected_taxa[level][taxon] += 1
                 results["Taxonomic_counts"] = selected_taxa
+                
+            # === Extension: Robustness & Redundancy metrics ===
+            sel_idx = np.where(x_single == 1)[0]
+            G_sel = self.G[:, sel_idx] if len(sel_idx) > 0 else np.zeros((self.G.shape[0], 0))
+            m = np.sum(G_sel, axis=1)  
             
+            
+            if len(sel_idx) > 0:
+                # Redundancy metrics
+                if np.sum(T_bool) > 0:
+                    redundancy = np.mean(np.maximum(m[T_bool] - 1, 0))
+                    spf = np.mean(m[T_bool] == 1)
+                else:
+                    redundancy, spf = 0.0, 0.0
+                results["Redundancy_index"] = float(redundancy)
+                results["Single_point_failure_frac"] = float(spf)
+                
+                # Robustness metrics (single deletions of strains)
+                robustness_vals = []
+                for i in range(G_sel.shape[1]):
+                    m_minus_i = m - G_sel[:, i]
+                    covered_after_del = np.sum((m_minus_i > 0) & T_bool)
+                    robustness_vals.append(covered_after_del / np.sum(T_bool) if np.sum(T_bool) > 0 else 0.0)
+                results["Robustness_avg_del"] = float(np.mean(robustness_vals))
+                results["Robustness_min_del"] = float(np.min(robustness_vals))
+                
+                # Contribution evenness (strain-level Shannon & Gini-Simpson)
+                contrib = np.sum(G_sel[T_bool, :], axis=0)  # contributions per strain
+                if np.sum(contrib) > 0:
+                    p_contrib = contrib / np.sum(contrib)
+                    shannon = -np.sum(p_contrib * np.log(p_contrib + 1e-12))
+                    gini_simpson = 1 - np.sum(p_contrib ** 2)
+                else:
+                    shannon, gini_simpson = 0.0, 0.0
+                results["Shannon_strain_contrib"] = float(shannon)
+                results["GiniSimpson_strain_contrib"] = float(gini_simpson)
+                
+                # Probability of Failure (PoF, approximate up to lethal pairs)
+                p_fail = getattr(self, "strain_fail_prob", 0.01)  # per-strain fail probability
+                essentials = [
+                    i for i in range(G_sel.shape[1])
+                    if np.any((G_sel[:, i] == 1) & (m == 1) & T_bool)
+                ]
+                PoF = len(essentials) * p_fail
+                for i in range(G_sel.shape[1]):
+                    for j in range(i + 1, G_sel.shape[1]):
+                        shared_loss = np.any(((m - G_sel[:, i] - G_sel[:, j]) == 0) & T_bool)
+                        if shared_loss:
+                            PoF += p_fail ** 2
+                results["PoF"] = min(PoF, 1.0)
+                results["Robustness_prob"] = 1 - results["PoF"]
+                
             return results
-            
+        
+        
         # Handle both single and multiple-solution cases.
         if x_opt.ndim == 1:
             return compute_metrics_single(T, x_opt)

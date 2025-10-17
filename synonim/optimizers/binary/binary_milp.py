@@ -156,6 +156,12 @@ class BinaryMILP(BinaryOptimizer):
         model_gp.Params.Symmetry = 2
         model_gp.Params.PoolSolutions = 10000
         
+        model_gp.Params.Aggregate = 0
+        # model_gp.Params.NumericFocus = 1
+        model_gp.Params.IntFeasTol     = 1e-9
+        model_gp.Params.FeasibilityTol = 1e-9
+        model_gp.Params.IntegralityFocus = 1
+        
         # Decision variables:
         #   x: binary selection vector for candidates (length k)
         #   B: binary indicators for gene coverage (length d)
@@ -369,8 +375,9 @@ class BinaryMILP(BinaryOptimizer):
             
             analysis_metrics = self.analyze_solution(self.M[:, scenario], x_sol)
             elapsed_time = time.time() - start_time
-
-            sol = Solution(method=self.descriptive_name,
+            
+            sol = Solution(name=self.metagenome_names[scenario],
+                           method=self.descriptive_name,
                            X_opt=x_sol,
                            objective=obj_val,
                            genome_names=self.genome_names,
@@ -381,21 +388,27 @@ class BinaryMILP(BinaryOptimizer):
                           )
             
             if sol_count != 0:
-                archive_rows = []
-                archive_scores = []
+                archived_solutions = []
                 for i in range(1, sol_count):
                     self.model_gp.Params.SolutionNumber = i
                     xn_sol = x_var.Xn  # Pool solution
                     obj_val_i = self.model_gp.PoolObjVal
+                    analysis_metrics2 = self.analyze_solution(self.M[:, scenario], xn_sol)
+                    arx_sol = Solution(name=self.metagenome_names[scenario],
+                                       method=self.descriptive_name,
+                                       X_opt=xn_sol,
+                                       objective=obj_val_i,
+                                       genome_names=self.genome_names,
+                                       selection_order=None,
+                                       details={"archive": True,
+                                       "scenario": scenario,
+                                       "runtime":elapsed_time,
+                                       "analysis": analysis_metrics2}
+                                      )
                     
-                    archive_rows.append(sp.csr_matrix(xn_sol))
-                    archive_scores.append(obj_val_i)
+                    archived_solutions.append(arx_sol)
                     
-                # Archive matrix and score array
-                archive_solutions = sp.vstack(archive_rows) if archive_rows else None
-                archive_scores_arr = np.array(archive_scores) if archive_scores else None
-                sol.details["archive_solutions"] = archive_solutions
-                sol.details["archive_scores"] = archive_scores_arr
+                sol.details["archived_solutions"] = archived_solutions
             
             solution_list.append(sol)
         

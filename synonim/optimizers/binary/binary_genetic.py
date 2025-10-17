@@ -1052,7 +1052,8 @@ class BinaryGenetic(BinaryOptimizer):
         elapsed_time = time.time() - start_time
         
         # Create a Solution object with pick scores and analysis details.
-        sol = Solution(method=self.descriptive_name,
+        sol = Solution(name=self.metagenome_names[scenario_idx],
+                       method=self.descriptive_name,
                        X_opt=X_opt,
                        objective=float(best_fitness),
                        genome_names=self.genome_names,
@@ -1061,12 +1062,29 @@ class BinaryGenetic(BinaryOptimizer):
                                 "runtime":elapsed_time,
                                 'best_indices': best_individual.tolist(),
                                 'generations_run': generations_run,
-                                'archive_solutions': archive_solutions,
-                                'archive_scores': archive_scores_arr,
                                 "analysis": analysis_metrics,
                                 }
                        )
         
+        archived_solutions = []
+        for i, xn_sol in enumerate(archive_solutions):
+            X_opt2 = xn_sol.toarray().flatten()
+            analysis_metrics2 = self.analyze_solution(T, X_opt2)
+            arx_sol = Solution(name=self.metagenome_names[scenario_idx],
+                               method=self.descriptive_name,
+                               X_opt=X_opt2,
+                               objective=archive_scores_arr[i],
+                               genome_names=self.genome_names,
+                               selection_order=None,
+                               details={"archive": True,
+                               "scenario": scenario_idx,
+                               "runtime":elapsed_time,
+                               "analysis": analysis_metrics2}
+                              )
+                              
+            archived_solutions.append(arx_sol)
+            
+        sol.details['archived_solutions'] = archived_solutions
         return sol
         
     def optimize(self) -> Union[Dict[str, Any], List[Dict[str, Any]]]:

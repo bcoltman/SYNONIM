@@ -467,6 +467,18 @@ class Model(Object):
         return mat
         
     @property
+    def metagenome_names(self) -> List[str]:
+        """
+        Return the names of metagenome profiles.
+        
+        Returns
+        -------
+        List[str]
+            A list of profile names.
+        """
+        return [profile.name for profile in self.metagenome_profiles]
+    
+    @property
     def genome_names(self) -> List[str]:
         """
         Return the names of genome profiles.

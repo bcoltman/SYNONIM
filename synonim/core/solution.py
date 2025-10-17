@@ -1,7 +1,7 @@
 import pandas as pd
 
 class Solution:
-    def __init__(self, X_opt, objective, genome_names, method=None, selection_order=None, details=None):
+    def __init__(self, name, X_opt, objective, genome_names, method=None, selection_order=None, details=None):
         """
         Parameters:
             X_opt (array-like): The binary vector indicating the selected candidates.
@@ -13,6 +13,7 @@ class Solution:
                 If not provided, the selected names will be derived from X_opt in the natural order.
             details (dict, optional): Additional metadata (e.g. runtime, logging info).
         """
+        self.name = name
         self.X_opt = X_opt
         self.objective = objective
         
