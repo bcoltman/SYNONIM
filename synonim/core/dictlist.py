@@ -103,6 +103,39 @@ class DictList(list):
         """Extend by appending each object, updating the index."""
         for obj in iterable:
             self.append(obj)
+
+    def index(self, entity: Union[str, Object], *args) -> int:
+        """Return the position of an object or id."""
+        if isinstance(entity, str):
+            try:
+                return self._dict[entity]
+            except KeyError:
+                raise ValueError(f"{entity} not found") from None
+
+        try:
+            idx = self._dict[entity.id]
+        except KeyError:
+            raise ValueError(f"{entity} not found") from None
+
+        if self[idx] is not entity:
+            raise ValueError(f"Another object with the identical id ({entity.id}) found")
+        return idx
+
+    def pop(self, index: int = -1) -> Object:
+        """Remove and return an item, updating the id index."""
+        value = list.pop(self, index)
+        self._dict.pop(value.id, None)
+
+        if index < 0:
+            index += len(self) + 1
+        for item_id, item_index in list(self._dict.items()):
+            if item_index > index:
+                self._dict[item_id] = item_index - 1
+        return value
+
+    def remove(self, entity: Union[str, Object]) -> None:
+        """Remove an object or id, updating the id index."""
+        self.pop(self.index(entity))
             
     def __contains__(self, entity: Union[str, Object]) -> bool:
         """Membership test by id or object."""
