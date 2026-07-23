@@ -1,5 +1,11 @@
 __author__ = "Benjamin Coltman."
-__version__ = "0.0.1"
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("synonim")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
 
 
 from synonim.core import (
@@ -13,4 +19,3 @@ from synonim.core import (
 )
 
 from synonim import io
-
