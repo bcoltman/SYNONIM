@@ -150,11 +150,17 @@ and ACP/AMR settings appended where relevant.
 
 ## SLURM
 
-Submit one SLURM job per expanded profile entry:
+Submit one SLURM job per strategy/configuration. MiMiC v1 and heuristic jobs
+evaluate all matching consortia sizes in one runner invocation; genetic and MILP
+jobs remain separate per size so each receives the historical wall-time budget.
+The full `large` profile therefore submits 85 jobs:
 
 ```bash
 benchmarks/slurm/submit_binary_profile.sh large --strategy heuristic
 ```
+
+Use `--consortia-size` when you want to submit only a selected size. Otherwise,
+the job evaluates every size defined for that strategy in the profile.
 
 The launcher does not hard-code cluster paths or conda environments. Use environment
 variables for local setup:

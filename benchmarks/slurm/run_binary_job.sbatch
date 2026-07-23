@@ -8,21 +8,25 @@ REPO_ROOT="${SYNONIM_BENCHMARK_REPO_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 : "${SYNONIM_BENCHMARK_PROFILE:?Set SYNONIM_BENCHMARK_PROFILE to tiny, medium, recovery, or large.}"
 : "${SYNONIM_BENCHMARK_STRATEGY:?Set SYNONIM_BENCHMARK_STRATEGY to mimic_v1, heuristic, genetic, or milp.}"
-: "${SYNONIM_BENCHMARK_CONSORTIA_SIZE:?Set SYNONIM_BENCHMARK_CONSORTIA_SIZE to the benchmark consortia size.}"
+: "${SYNONIM_BENCHMARK_CONSORTIA_SIZES:?Set SYNONIM_BENCHMARK_CONSORTIA_SIZES to the benchmark consortia sizes.}"
 
 if [[ -n "${SYNONIM_BENCHMARK_SETUP_COMMAND:-}" ]]; then
   eval "${SYNONIM_BENCHMARK_SETUP_COMMAND}"
 fi
 
-summary_prefix="binary_${SYNONIM_BENCHMARK_STRATEGY}_k${SYNONIM_BENCHMARK_CONSORTIA_SIZE}"
+summary_prefix="binary_${SYNONIM_BENCHMARK_STRATEGY}"
 
 ARGS=(
   "${REPO_ROOT}/benchmarks/run_binary_optimizers.py"
   --profile "${SYNONIM_BENCHMARK_PROFILE}"
   --strategy "${SYNONIM_BENCHMARK_STRATEGY}"
-  --consortia-size "${SYNONIM_BENCHMARK_CONSORTIA_SIZE}"
   --output-dir "${SYNONIM_BENCHMARK_OUTPUT_DIR:-${REPO_ROOT}/benchmarks/outputs/${SYNONIM_BENCHMARK_PROFILE}/results}"
 )
+
+IFS=',' read -r -a CONSORTIA_SIZES <<< "${SYNONIM_BENCHMARK_CONSORTIA_SIZES}"
+for size in "${CONSORTIA_SIZES[@]}"; do
+  ARGS+=(--consortia-size "${size}")
+done
 
 if [[ -n "${SYNONIM_BENCHMARK_ACP:-}" ]]; then
   ARGS+=(--absence-cover-penalty "${SYNONIM_BENCHMARK_ACP}")

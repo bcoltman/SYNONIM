@@ -18,6 +18,10 @@ OUTPUT_DIR="${SYNONIM_BENCHMARK_OUTPUT_DIR:-${REPO_ROOT}/benchmarks/outputs/${PR
 LOG_DIR="$(pwd)/logs"
 mkdir -p "${LOG_DIR}"
 
+declare -A GROUP_SIZES
+declare -A GROUP_SEEN
+GROUP_ORDER=()
+
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
   [[ "${line}" =~ ^[0-9]+[[:space:]]job\(s\)$ ]] && continue
@@ -36,6 +40,25 @@ while IFS= read -r line; do
       ma*-mp*-mi*) mask="${token}" ;;
     esac
   done
+
+  group_size=""
+  if [[ "${strategy}" == "genetic" || "${strategy}" == "milp" ]]; then
+    group_size="${size}"
+  fi
+  key="${strategy}|${acp}|${amr}|${mask}|${group_size}"
+  if [[ -z "${GROUP_SEEN[${key}]+x}" ]]; then
+    GROUP_SEEN["${key}"]=1
+    GROUP_ORDER+=("${key}")
+  fi
+  if [[ -n "${GROUP_SIZES[${key}]:-}" ]]; then
+    GROUP_SIZES["${key}"]+=",${size}"
+  else
+    GROUP_SIZES["${key}"]="${size}"
+  fi
+done < <(python "${RUNNER}" --profile "${PROFILE}" --dry-run "$@")
+
+for key in "${GROUP_ORDER[@]}"; do
+  IFS='|' read -r strategy acp amr mask group_size <<< "${key}"
 
   case "${strategy}" in
     mimic_v1)
@@ -64,7 +87,10 @@ while IFS= read -r line; do
       ;;
   esac
 
-  name="synonim-${strategy}-k${size}"
+  name="synonim-${strategy}"
+  if [[ -n "${group_size}" ]]; then
+    name="${name}-k${group_size}"
+  fi
   suffix=""
   extra_exports=""
   if [[ -n "${acp}" ]]; then
@@ -88,6 +114,6 @@ while IFS= read -r line; do
     --time="${time_limit}" \
     --output="${LOG_DIR}/%x-%j.out" \
     --error="${LOG_DIR}/%x-%j.err" \
-    --export="ALL,SYNONIM_BENCHMARK_REPO_ROOT=${REPO_ROOT},SYNONIM_BENCHMARK_PROFILE=${PROFILE},SYNONIM_BENCHMARK_STRATEGY=${strategy},SYNONIM_BENCHMARK_CONSORTIA_SIZE=${size},SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR},SYNONIM_BENCHMARK_PROCESSES=${cpus}${extra_exports}" \
+    --export="ALL,SYNONIM_BENCHMARK_REPO_ROOT=${REPO_ROOT},SYNONIM_BENCHMARK_PROFILE=${PROFILE},SYNONIM_BENCHMARK_STRATEGY=${strategy},SYNONIM_BENCHMARK_CONSORTIA_SIZES=${GROUP_SIZES[${key}]},SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR},SYNONIM_BENCHMARK_PROCESSES=${cpus}${extra_exports}" \
     "${SBATCH_SCRIPT}"
-done < <(python "${RUNNER}" --profile "${PROFILE}" --dry-run "$@")
+done
