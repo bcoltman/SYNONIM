@@ -84,6 +84,6 @@ while IFS= read -r line; do
     --cpus-per-task="${cpus}" \
     --mem="${mem}" \
     --time="${time_limit}" \
-    --export="ALL,SYNONIM_BENCHMARK_PROFILE=${PROFILE},SYNONIM_BENCHMARK_STRATEGY=${strategy},SYNONIM_BENCHMARK_CONSORTIA_SIZE=${size},SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR},SYNONIM_BENCHMARK_PROCESSES=${cpus}${extra_exports}" \
+    --export="ALL,SYNONIM_BENCHMARK_REPO_ROOT=${REPO_ROOT},SYNONIM_BENCHMARK_PROFILE=${PROFILE},SYNONIM_BENCHMARK_STRATEGY=${strategy},SYNONIM_BENCHMARK_CONSORTIA_SIZE=${size},SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR},SYNONIM_BENCHMARK_PROCESSES=${cpus}${extra_exports}" \
     "${SBATCH_SCRIPT}"
 done < <(python "${RUNNER}" --profile "${PROFILE}" --dry-run "$@")
