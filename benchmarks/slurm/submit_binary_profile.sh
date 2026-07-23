@@ -15,6 +15,8 @@ shift || true
 RUNNER="${REPO_ROOT}/benchmarks/run_binary_optimizers.py"
 SBATCH_SCRIPT="${SCRIPT_DIR}/run_binary_job.sbatch"
 OUTPUT_DIR="${SYNONIM_BENCHMARK_OUTPUT_DIR:-${REPO_ROOT}/benchmarks/outputs/${PROFILE}/results}"
+LOG_DIR="$(pwd)/logs"
+mkdir -p "${LOG_DIR}"
 
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
@@ -84,6 +86,8 @@ while IFS= read -r line; do
     --cpus-per-task="${cpus}" \
     --mem="${mem}" \
     --time="${time_limit}" \
+    --output="${LOG_DIR}/%x-%j.out" \
+    --error="${LOG_DIR}/%x-%j.err" \
     --export="ALL,SYNONIM_BENCHMARK_REPO_ROOT=${REPO_ROOT},SYNONIM_BENCHMARK_PROFILE=${PROFILE},SYNONIM_BENCHMARK_STRATEGY=${strategy},SYNONIM_BENCHMARK_CONSORTIA_SIZE=${size},SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR},SYNONIM_BENCHMARK_PROCESSES=${cpus}${extra_exports}" \
     "${SBATCH_SCRIPT}"
 done < <(python "${RUNNER}" --profile "${PROFILE}" --dry-run "$@")
