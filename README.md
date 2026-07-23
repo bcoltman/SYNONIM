@@ -57,13 +57,13 @@ To include the optional Gurobi-backed MILP solver:
 pip install -e ".[dev,milp]"
 ```
 
-COMING SOON: Install from PyPI or Bioconda:
+Install releases from PyPI:
 
 ```bash
 pip install synonim
-# or
-conda install -c bioconda synonim
 ```
+
+Bioconda packaging is planned after the first PyPI release.
 
 ---
 
@@ -131,7 +131,7 @@ Load binary presence/absence tables as pandas DataFrames indexed by feature ID, 
 4. **Run optimization**: select from algorithms.
 5. **Inspect results**: obtain community composition, predicted functions, and diagnostic plots.
 
-Detailed API docs and examples will be available at [synonim.readthedocs.io](https://synonim.readthedocs.io).
+Detailed API docs and examples are planned.
 
 ---
 
