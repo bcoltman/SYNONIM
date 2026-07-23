@@ -259,6 +259,12 @@ Run the optional Gurobi-backed MILP smoke test:
 pytest -q -m milp
 ```
 
+## Benchmarks
+
+Binary benchmark inputs and runners live under `benchmarks/`. They are not executed
+during install, import, build, or normal tests. See `benchmarks/README.md` for the
+tiny, medium, recovery, and large profiles, plotting workflow, and SLURM launcher.
+
 ---
 
 ## Contributing
