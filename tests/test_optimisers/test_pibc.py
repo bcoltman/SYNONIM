@@ -5,14 +5,14 @@ from synonim.io import model_from_frames
 from synonim.optimizers.binary import BinaryHeuristic
 
 
-def test_binary_heuristic_runs_on_mimic_pibc_subset(data_directory):
+def test_binary_heuristic_runs_on_pibc_subset(pibc_data_directory):
     genomes = pd.read_csv(
-        data_directory / "mimic_pibc_binary_genomes.txt",
+        pibc_data_directory / "pibc_binary_genomes.txt",
         sep="\t",
         index_col="PfamID",
     ).iloc[:, :25]
     metagenomes = pd.read_csv(
-        data_directory / "mimic_pibc_binary_metagenomes.txt",
+        pibc_data_directory / "pibc_binary_metagenomes.txt",
         sep="\t",
         index_col="PfamID",
     ).iloc[:, :1]

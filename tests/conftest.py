@@ -9,6 +9,11 @@ def data_directory() -> Path:
     return Path(__file__).parent / "data"
 
 
+@pytest.fixture(scope="session")
+def pibc_data_directory() -> Path:
+    return Path(__file__).parents[1] / "benchmarks" / "data" / "pibc"
+
+
 @pytest.fixture
 def toy_frames():
     features = ["f1", "f2", "f3", "f4"]

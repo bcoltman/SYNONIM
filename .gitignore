@@ -14,3 +14,12 @@ build/
 .ipynb_checkpoints/
 __pycache__/
 .mypy_cache/
+benchmarks/results/
+benchmarks/plots/
+benchmarks/outputs/
+benchmarks/logs/
+benchmarks/**/*.pkl
+benchmarks/**/*.pickle
+benchmarks/**/*.mps
+benchmarks/**/*.mst
+benchmarks/**/*.sol
