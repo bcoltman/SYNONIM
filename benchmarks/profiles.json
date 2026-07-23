@@ -1,0 +1,216 @@
+{
+  "profiles": {
+    "tiny": {
+      "description": "Very fast PiBC slice for runner and sanity tests; not intended as an informative benchmark.",
+      "data": {
+        "genomes": "data/pibc/pibc_binary_genomes.txt",
+        "metagenomes": "data/pibc/pibc_binary_metagenomes.txt",
+        "index_col": "PfamID",
+        "feature_limit": 80,
+        "genome_limit": 12,
+        "scenario_limit": 1,
+        "expected_features": 80,
+        "expected_genomes": 12,
+        "expected_scenarios": 1
+      },
+      "runs": {
+        "mimic_v1": {
+          "consortia_sizes": [2],
+          "config_grid": {}
+        },
+        "heuristic": {
+          "consortia_sizes": [2],
+          "config_grid": {
+            "absence_cover_penalty": [1],
+            "absence_match_reward": [0],
+            "mask_covered_absent_features": [false],
+            "mask_covered_present_features": [false],
+            "mask_covered_isolate_features": [false]
+          }
+        },
+        "genetic": {
+          "consortia_sizes": [2],
+          "population_size": 12,
+          "generations": 2,
+          "max_unchanged_generations": 1,
+          "mutation_rate": 0.05,
+          "tournament_size": 2,
+          "exploration_rate": 0.2,
+          "processes": 1,
+          "config_grid": {
+            "absence_cover_penalty": [1],
+            "absence_match_reward": [0]
+          }
+        }
+      }
+    },
+    "medium": {
+      "description": "Synthetic medium benchmark with clean modules, overlapping bridges, and noisy decoys; sized for restricted gurobipy.",
+      "data": {
+        "genomes": "data/synthetic/medium_binary_genomes.txt",
+        "metagenomes": "data/synthetic/medium_binary_metagenomes.txt",
+        "index_col": "PfamID",
+        "feature_limit": 80,
+        "genome_limit": 46,
+        "scenario_limit": 5,
+        "expected_features": 80,
+        "expected_genomes": 46,
+        "expected_scenarios": 5
+      },
+      "runs": {
+        "mimic_v1": {
+          "consortia_sizes": [3, 5, 7],
+          "config_grid": {}
+        },
+        "heuristic": {
+          "consortia_sizes": [3, 5, 7],
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1],
+            "mask_covered_absent_features": [false, true],
+            "mask_covered_present_features": [false, true],
+            "mask_covered_isolate_features": [false, true]
+          }
+        },
+        "genetic": {
+          "consortia_sizes": [3, 5, 7],
+          "population_size": 80,
+          "generations": 60,
+          "max_unchanged_generations": 12,
+          "mutation_rate": 0.05,
+          "tournament_size": 5,
+          "exploration_rate": 0.2,
+          "processes": 1,
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1]
+          }
+        },
+        "milp": {
+          "consortia_sizes": [3, 5, 7],
+          "processes": 1,
+          "time_limit": 300,
+          "warm_start": "heuristic",
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1]
+          }
+        }
+      }
+    },
+    "recovery": {
+      "description": "Synthetic OR-recovery benchmark with known source genomes for each generated metagenome; sized for restricted gurobipy.",
+      "data": {
+        "genomes": "data/synthetic/recovery_binary_genomes.txt",
+        "metagenomes": "data/synthetic/recovery_binary_metagenomes.txt",
+        "index_col": "PfamID",
+        "feature_limit": 80,
+        "genome_limit": 44,
+        "scenario_limit": 4,
+        "expected_features": 80,
+        "expected_genomes": 44,
+        "expected_scenarios": 4
+      },
+      "truth": {
+        "recovery_k3_exact": ["source_01", "source_05", "source_09"],
+        "recovery_k5_exact": ["source_02", "source_04", "source_06", "source_08", "source_10"],
+        "recovery_k7_exact": ["source_01", "source_03", "source_05", "source_07", "source_09", "source_11", "source_12"],
+        "recovery_greedy_trap": ["trap_exact_a", "trap_exact_b", "trap_exact_c"]
+      },
+      "runs": {
+        "mimic_v1": {
+          "consortia_sizes": [3, 5, 7],
+          "config_grid": {}
+        },
+        "heuristic": {
+          "consortia_sizes": [3, 5, 7],
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1],
+            "mask_covered_absent_features": [false, true],
+            "mask_covered_present_features": [false, true],
+            "mask_covered_isolate_features": [false, true]
+          }
+        },
+        "genetic": {
+          "consortia_sizes": [3, 5, 7],
+          "population_size": 80,
+          "generations": 60,
+          "max_unchanged_generations": 12,
+          "mutation_rate": 0.05,
+          "tournament_size": 5,
+          "exploration_rate": 0.2,
+          "processes": 1,
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1]
+          }
+        },
+        "milp": {
+          "consortia_sizes": [3, 5, 7],
+          "processes": 1,
+          "time_limit": 300,
+          "warm_start": "heuristic",
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1]
+          }
+        }
+      }
+    },
+    "large": {
+      "description": "Historical PiBC validation matrix released with MiMiC: first 8 scenarios, 111 genomes, and 17929 features; full MILP runs require a licensed Gurobi installation.",
+      "data": {
+        "genomes": "data/pibc/pibc_binary_genomes.txt",
+        "metagenomes": "data/pibc/pibc_binary_metagenomes.txt",
+        "index_col": "PfamID",
+        "feature_limit": 17929,
+        "genome_limit": 111,
+        "scenario_limit": 8,
+        "expected_features": 17929,
+        "expected_genomes": 111,
+        "expected_scenarios": 8
+      },
+      "runs": {
+        "mimic_v1": {
+          "consortia_sizes": [1, 2, 3, 4, 5, 7, 10, 12, 15, 17, 20, 25, 30],
+          "config_grid": {}
+        },
+        "heuristic": {
+          "consortia_sizes": [1, 2, 3, 4, 5, 7, 10, 12, 15, 17, 20, 25, 30],
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1],
+            "mask_covered_absent_features": [false, true],
+            "mask_covered_present_features": [false, true],
+            "mask_covered_isolate_features": [false, true]
+          }
+        },
+        "genetic": {
+          "consortia_sizes": [3, 5, 7, 10, 12, 15, 17, 20, 25, 30],
+          "population_size": 1000,
+          "generations": 200,
+          "max_unchanged_generations": 10,
+          "mutation_rate": 0.05,
+          "tournament_size": 10,
+          "exploration_rate": 0.2,
+          "processes": 8,
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1]
+          }
+        },
+        "milp": {
+          "consortia_sizes": [10, 20, 30],
+          "processes": 8,
+          "time_limit": 86400,
+          "warm_start": "heuristic",
+          "config_grid": {
+            "absence_cover_penalty": [0, 1],
+            "absence_match_reward": [0, 1]
+          }
+        }
+      }
+    }
+  }
+}
