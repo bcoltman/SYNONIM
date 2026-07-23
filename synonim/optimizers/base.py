@@ -229,6 +229,9 @@ class BinaryOptimizer(BaseOptimizer):
         """
         
         def compute_metrics_single(T_single: np.ndarray, x_single: np.ndarray) -> Dict[str, Any]:
+            def safe_divide(numerator: float, denominator: float) -> float:
+                return float(numerator / denominator) if denominator else 0.0
+
             # Convert to boolean for logical operations.
             T_bool = T_single.astype(bool)
             # 'combined' is the aggregated candidate coverage.
@@ -245,21 +248,24 @@ class BinaryOptimizer(BaseOptimizer):
             results["FP"] = int(np.sum(~T_bool & combined))
             results["TN"] = int(np.sum(~T_bool & ~combined))
             
-            results["TPR/recall"] = results["TP"] / results["P"]
-            results["FPR"] = results["FP"] / results["N"]
-            results["FNR"] = results["FN"] / results["P"]
-            results["TNR/specificity"] = results["TN"] / results["N"]
+            results["TPR/recall"] = safe_divide(results["TP"], results["P"])
+            results["FPR"] = safe_divide(results["FP"], results["N"])
+            results["FNR"] = safe_divide(results["FN"], results["P"])
+            results["TNR/specificity"] = safe_divide(results["TN"], results["N"])
             
-            results["Jaccard"] = results["TP"] / (results["TP"] + results["FN"] + results["FP"])
+            results["Jaccard"] = safe_divide(results["TP"], results["TP"] + results["FN"] + results["FP"])
             
-            results["PPV/precision"] = results["TP"] / (results["TP"] + results["FP"])
-            results["NPV"] = results["TN"] / (results["TN"] + results["FN"])
-            results["FDR"] = results["FP"] / (results["TP"] + results["FP"])
-            results["FOR"] = results["FN"] / (results["TN"] + results["FN"])
+            results["PPV/precision"] = safe_divide(results["TP"], results["TP"] + results["FP"])
+            results["NPV"] = safe_divide(results["TN"], results["TN"] + results["FN"])
+            results["FDR"] = safe_divide(results["FP"], results["TP"] + results["FP"])
+            results["FOR"] = safe_divide(results["FN"], results["TN"] + results["FN"])
             
-            results["ACC"] = (results["TP"] + results["TN"]) / (results["P"] + results["N"])
+            results["ACC"] = safe_divide(results["TP"] + results["TN"], results["P"] + results["N"])
             results["BA"] = (results["TPR/recall"] + results["TNR/specificity"]) / 2
-            results["F1_score"] = (2 * results["PPV/precision"] *results["TPR/recall"])/ (results["PPV/precision"] + results["TPR/recall"])
+            results["F1_score"] = safe_divide(
+                2 * results["PPV/precision"] * results["TPR/recall"],
+                results["PPV/precision"] + results["TPR/recall"],
+            )
             
             p1 = np.sqrt(results["TPR/recall"] * results["TNR/specificity"] * results["PPV/precision"] * results["NPV"])
             p2 = np.sqrt(results["FNR"] * results["FPR"] * results["FOR"] * results["FDR"])
