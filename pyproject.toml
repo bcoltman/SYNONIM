@@ -15,9 +15,9 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
-    "pandas", 
-    "gurobipy",
-    "scipy"
+    "pandas",
+    "scipy",
+    "threadpoolctl"
 ]
 keywords = ["microbial community", "SynCom", "synthetic communities", "environmental biotechnology"]
 
@@ -40,6 +40,7 @@ Tracker = "https://github.com/bcoltman/synonim/issues"
 
 [project.optional-dependencies]
 dev = ["pytest", "black", "isort", "mypy"]
+milp = ["gurobipy"]
 
 [tool.pytest.ini_options]
 markers = [

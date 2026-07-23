@@ -1,10 +1,17 @@
 import time
 import numpy as np
-import gurobipy as gp
-from gurobipy import GRB
 import scipy.sparse as sp
 
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+try:
+    import gurobipy as gp
+    from gurobipy import GRB
+except ImportError:
+    raise ImportError(
+        "BinaryMILP requires the optional Gurobi dependency. "
+        "Install it with `pip install synonim[milp]`."
+    ) from None
 
 from synonim.core import Profile, Model
 from synonim.optimizers import BinaryOptimizer, Solution
