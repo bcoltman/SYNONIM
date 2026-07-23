@@ -1,17 +1,11 @@
 import pandas as pd
-import numpy as np
-from typing import List, Optional, Dict, Union
+from typing import List, Optional
 import logging
 
-# Import your custom classes. Adjust these imports according to your project structure.
 from ..core import Model, Feature, Profile
 
 logger = logging.getLogger(__name__)
 
-import pandas as pd
-import logging
-
-logger = logging.getLogger(__name__)
 
 def model_from_frames(
     genomes_binary: Optional[pd.DataFrame] = None,
@@ -23,6 +17,13 @@ def model_from_frames(
     model_id: Optional[str] = None,
     model_name: Optional[str] = None,
 ) -> Model:
+    """
+    Build a SYNONIM model from feature-by-sample data frames.
+
+    Data frames must use feature IDs as their index and sample IDs as columns.
+    If ``genomes_info`` is provided, it must be indexed by genome sample ID so
+    metadata and taxonomy can be attached to the matching genome profiles.
+    """
     
     gb = genomes_binary.astype(int) if genomes_binary is not None else None
     ga = genomes_abundance.astype(float) if genomes_abundance is not None else None
@@ -114,9 +115,16 @@ def model_from_frames(
             
             # Prepare metadata and taxonomy
             meta, tax = {}, {}
-            if prof_type == "genome" and genomes_info is not None and s in genomes_info.index:
-                meta = genomes_info.loc[s].to_dict()
-                tax = {c: meta[c] for c in taxonomy_cols if c in meta} if taxonomy_cols else {}
+            if prof_type == "genome" and genomes_info is not None:
+                if s in genomes_info.index:
+                    meta = genomes_info.loc[s].to_dict()
+                    tax = {c: meta[c] for c in taxonomy_cols if c in meta} if taxonomy_cols else {}
+                else:
+                    logger.warning(
+                        "No genomes_info row found for genome sample %r; "
+                        "genomes_info must be indexed by sample ID.",
+                        s,
+                    )
                 
                     
             p = Profile(id=str(s), name=str(s), profile_type=prof_type,
