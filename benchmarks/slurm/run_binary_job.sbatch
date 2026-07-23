@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 #SBATCH --ntasks=1
-#SBATCH --output=%x-%j.out
-#SBATCH --error=%x-%j.err
 
 set -euo pipefail
 
