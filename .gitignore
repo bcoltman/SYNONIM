@@ -8,6 +8,7 @@ build/
 *.egg-info/
 .env
 .venv
+.local/
 .envrc
 .cache
 .ipynb_checkpoints/

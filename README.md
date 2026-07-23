@@ -48,23 +48,30 @@ For development and tests:
 ```bash
 git clone https://github.com/bcoltman/SYNONIM.git
 cd SYNONIM
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
-COMING SOON: Install from PyPI or Conda-Forge:
+To include the optional Gurobi-backed MILP solver:
+
+```bash
+pip install -e ".[dev,milp]"
+```
+
+COMING SOON: Install from PyPI or Bioconda:
 
 ```bash
 pip install synonim
 # or
-conda install -c conda-forge synonim
+conda install -c bioconda synonim
 ```
 
 ---
 
 ## Quickstart
 
-### Binary‑based Design
-Loading binary (presence/absence) and/or abundance tables as pandas DataFrames indexed by feature ID, with columns as sample IDs.
+### Binary-based Design
+
+Load binary presence/absence tables as pandas DataFrames indexed by feature ID, with columns as sample IDs.
 
 1. **Load binary profiles** (e.g., isolate or metagenomic function presence/absence data):
 
@@ -72,10 +79,9 @@ Loading binary (presence/absence) and/or abundance tables as pandas DataFrames i
    import pandas as pd
    from synonim.io import model_from_frames
    
-   # Read CSV into presence/abundance frames
-   genomes_info = pd.read_csv("candidates_info.csv")
-   genomes = pd.read_csv("candidates_binary.csv")
-   metagenomes = pd.read_csv("metagenomes_binary.csv")
+   genomes_info = pd.read_csv("candidates_info.csv", index_col=0)
+   genomes = pd.read_csv("candidates_binary.csv", index_col=0)
+   metagenomes = pd.read_csv("metagenomes_binary.csv", index_col=0)
    ```
 
 2. **Build a Model**:
@@ -89,19 +95,22 @@ Loading binary (presence/absence) and/or abundance tables as pandas DataFrames i
    )
    ```
 
-3. **Instantiate an optimizer** (e.g., BinaryGenetic):
-  Specify an upper limit of 1 member from each genera and a total consortia size of 10
+3. **Instantiate an optimizer**:
+  Specify an upper limit of one member from each genus and a total consortia size of 10. Optional
+  feature weights can be supplied as a dictionary, pandas Series, pandas DataFrame, or NumPy array.
    ```python
-   from synonim.optimizers.binary import BinaryGenetic
+   from synonim.optimizers.binary import BinaryHeuristic
 
-   optimizer = BinaryGenetic(
+   feature_weights = {"PF00001": 5.0, "PF00002": 2.0}
+
+   optimizer = BinaryHeuristic(
        model=model,
        consortia_size=10,
+       weights=feature_weights,
        taxonomy_constraints={"genus": {"default": {"max": 1}}},
        taxonomic_levels=["domain", "genus"],
-       population_size=500,
-       generations=100,
-       processes=4
+       absence_cover_penalty=1,
+       absence_match_reward=0
    )
    ```
 
@@ -117,7 +126,7 @@ Loading binary (presence/absence) and/or abundance tables as pandas DataFrames i
 ## Usage
 
 1. **Load data**: import isolate or metagenomic profiles (CSV, BIOM, or Pandas).
-2. **Configure objectives**: customise objective (e.g. for binary, whether mismtaches are penalised).
+2. **Configure objectives**: customise the binary objective with feature weights and mismatch penalties.
 3. **Apply constraints**: narrow search space via taxonomy, metadata ranges, or co-occurrence networks.
 4. **Run optimization**: select from algorithms.
 5. **Inspect results**: obtain community composition, predicted functions, and diagnostic plots.
@@ -151,7 +160,7 @@ SYNONIM defines three core classes for programmatic model construction:
   * `profile_type`: either "genome" or "metagenome"
   * `metadata`: arbitrary key/value pairs describing the sample
   * `taxonomy`: taxonomic annotations (for genome profiles)
-  * **Features**: added via `profile.add_features({Feature: {"presence": int, "abundance": float?}})`
+  * **Features**: added via `profile.add_features({Feature: {"presence": int}})`
 
 * **Model**: Container for a set of `Feature` and `Profile` objects, ready for optimization. A `Model` provides methods:
 
@@ -177,14 +186,14 @@ SYNONIM defines three core classes for programmatic model construction:
    ```python
    
    profile = Profile(id=sample, name=sample, profile_type="genome", metadata=meta_dict, taxonomy=tax_dict)
-   profile.add_features({feature: {"presence": pres, "abundance": ab} for feature, pres, ab in ...})
+   profile.add_features({feature: {"presence": pres} for feature, pres in ...})
    model.add_profiles([profile])
    ```
-5. The assembled `Model` can now be passed to `CommunityDesigner`:
+5. The assembled `Model` can now be passed to an optimizer:
 
    ```python
    optimizer = BinaryHeuristic(model=model, consortia_size=10)
-   SynCom = designer.optimize()
+   solution = optimizer.optimize()
    ```
 
 ---
@@ -194,7 +203,7 @@ SYNONIM defines three core classes for programmatic model construction:
 ### Binary Optimizers
 
 * **BinaryGenetic**: Uses presence/absence matrices to select consortia members.
-  **Parameters**: `model`, `consortia_size`, `taxonomy_constraints`, `taxonomic_levels`, `population_size`, `generations`, `processes`, `absence_cover_penalty`, `absence_match_reward`.
+  **Parameters**: `model`, `consortia_size`, `weights`, `taxonomy_constraints`, `taxonomic_levels`, `population_size`, `generations`, `processes`, `absence_cover_penalty`, `absence_match_reward`.
   **Usage**:
 
   ```python
@@ -211,7 +220,7 @@ SYNONIM defines three core classes for programmatic model construction:
   ```
 
 * **BinaryHeuristic**: Fast heuristic solver
-  **Parameters**: same as `BinaryGenetic`, plus masking options (`mask_covered_absent_features`, `mask_covered_present_features`, `mask_covered_isolate_features`).
+  **Parameters**: `model`, `consortia_size`, `weights`, `taxonomy_constraints`, `taxonomic_levels`, `absence_cover_penalty`, `absence_match_reward`, plus masking options (`mask_covered_absent_features`, `mask_covered_present_features`, `mask_covered_isolate_features`).
   **Usage**:
 
   ```python
@@ -221,7 +230,8 @@ SYNONIM defines three core classes for programmatic model construction:
   ```
 
 * **BinaryMILP**: Mixed‑Integer Linear Programming solver for binary design.
-  **Parameters**: same as `BinaryGenetic`, plus `time_limit`.
+  Requires `gurobipy`, available through the `milp` extra.
+  **Parameters**: `model`, `consortia_size`, `weights`, `taxonomy_constraints`, `taxonomic_levels`, `absence_cover_penalty`, `absence_match_reward`, plus `time_limit`.
   **Usage**:
 
   ```python
@@ -240,7 +250,13 @@ SYNONIM defines three core classes for programmatic model construction:
 Run unit and integration tests:
 
 ```bash
-pytest
+pytest -q -m "not milp"
+```
+
+Run the optional Gurobi-backed MILP smoke test:
+
+```bash
+pytest -q -m milp
 ```
 
 ---
@@ -254,8 +270,6 @@ Contributions are welcome! Please follow the steps:
 3. Commit changes with clear messages.
 4. Submit a pull request and fill out the template.
 5. We review and iterate!
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 
