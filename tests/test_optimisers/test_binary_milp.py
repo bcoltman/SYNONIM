@@ -26,5 +26,8 @@ def test_binary_milp_solves_tiny_model_with_restricted_license():
 
     assert solution.selected_names == ["g1", "g2"]
     assert solution.objective == pytest.approx(4.0)
+    assert solution.details["solver_status"] == "OPTIMAL"
+    assert solution.details["solver_status_code"] > 0
+    assert solution.details["mip_gap"] == pytest.approx(0.0)
     assert solution.details["analysis"]["TP"] == 2
     assert solution.details["analysis"]["FP"] == 0

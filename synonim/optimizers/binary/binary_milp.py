@@ -24,6 +24,38 @@ logger = logging.getLogger(__name__)
 gurobi_logger = logging.getLogger('gurobipy')
 gurobi_logger.setLevel(logging.INFO)#WARNING)
 
+GUROBI_STATUS_NAMES = {
+    getattr(GRB, name): name
+    for name in (
+        "LOADED",
+        "OPTIMAL",
+        "INFEASIBLE",
+        "INF_OR_UNBD",
+        "UNBOUNDED",
+        "CUTOFF",
+        "ITERATION_LIMIT",
+        "NODE_LIMIT",
+        "TIME_LIMIT",
+        "SOLUTION_LIMIT",
+        "INTERRUPTED",
+        "NUMERIC",
+        "SUBOPTIMAL",
+        "INPROGRESS",
+        "USER_OBJ_LIMIT",
+        "WORK_LIMIT",
+    )
+    if hasattr(GRB, name)
+}
+
+
+def _finite_model_float(model: gp.Model, attribute: str) -> Optional[float]:
+    try:
+        value = float(getattr(model, attribute))
+    except (gp.GurobiError, AttributeError, TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
 class BinaryMILP(BinaryOptimizer):
     """
     MILP optimizer with support for multi-level taxonomy constraints.
@@ -361,8 +393,14 @@ class BinaryMILP(BinaryOptimizer):
         """
         start_time = time.time()
         self.model_gp.optimize()
-        if self.model_gp.Status not in [GRB.OPTIMAL, GRB.WORK_LIMIT, GRB.TIME_LIMIT]:
+        status_code = int(self.model_gp.Status)
+        if status_code not in [GRB.OPTIMAL, GRB.WORK_LIMIT, GRB.TIME_LIMIT]:
             raise RuntimeError(f"MILP optimization failed with status {self.model_gp.Status}")
+        solver_details = {
+            "solver_status_code": status_code,
+            "solver_status": GUROBI_STATUS_NAMES.get(status_code, str(status_code)),
+            "mip_gap": _finite_model_float(self.model_gp, "MIPGap"),
+        }
             
         x_var = self.variables["x"]
         d, s = self.M.shape
@@ -392,7 +430,8 @@ class BinaryMILP(BinaryOptimizer):
                            selection_order=None,
                            details={"scenario": scenario,
                                     "runtime":elapsed_time,
-                                    "analysis": analysis_metrics}
+                                    "analysis": analysis_metrics,
+                                    **solver_details}
                           )
             
             if sol_count != 0:
@@ -411,7 +450,8 @@ class BinaryMILP(BinaryOptimizer):
                                        details={"archive": True,
                                        "scenario": scenario,
                                        "runtime":elapsed_time,
-                                       "analysis": analysis_metrics2}
+                                       "analysis": analysis_metrics2,
+                                       **solver_details}
                                       )
                     
                     archived_solutions.append(arx_sol)
