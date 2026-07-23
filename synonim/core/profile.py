@@ -9,11 +9,9 @@ class Profile(Object):
     Represents a genome or metagenome profile with per-feature data.
     
     All feature data is stored in a dictionary (_features) where keys are Feature objects
-    and values are dictionaries containing:
-        - "presence": int (typically 0 or 1)
-        - "abundance": Optional[float] (None indicates no abundance data)
-        
-    This design allows merging of feature data and supports operations such as scaling.
+    and values are dictionaries containing binary "presence" values.
+
+    This design allows merging of feature data.
     Reversible (context-based) modifications are supported: for instance, modifications to
     the taxonomy, metadata, or feature data can be reversed upon exit from a context.
     """
@@ -48,8 +46,8 @@ class Profile(Object):
         # Store taxonomy and metadata in private attributes so that their setters can be reversible.
         self._taxonomy = taxonomy if taxonomy is not None else {}
         self._metadata = metadata if metadata is not None else {}
-        # Each feature maps to a dict with keys "presence" (int) and "abundance" (Optional[float])
-        self._features: Dict[Feature, Dict[str, Union[int, Optional[float]]]] = {}
+        # Each feature maps to a dict with key "presence" (int).
+        self._features: Dict[Feature, Dict[str, int]] = {}
         
     @property
     def taxonomy(self) -> dict:
@@ -89,7 +87,7 @@ class Profile(Object):
         
     def add_features(
         self, 
-        features_to_add: Dict[Union[Feature, str], Dict[str, Union[int, float, None]]],
+        features_to_add: Dict[Union[Feature, str], Dict[str, int]],
         combine: bool = True,
         reversibly: bool = True
     ) -> None:
@@ -97,7 +95,7 @@ class Profile(Object):
         Add or update feature data for the profile.
         
         Each entry in the input dictionary maps a feature (or feature id) to a dictionary
-        containing (optionally) "presence" and/or "abundance" values. When provided as a string,
+        containing "presence" values. When provided as a string,
         the feature is looked up in the profile.
         
         When `reversibly` is True, the entire state of the feature mapping is saved and a reversal
@@ -106,12 +104,10 @@ class Profile(Object):
         Parameters
         ----------
         features_to_add : dict
-            Dictionary mapping Feature objects (or feature ids) to dictionaries with keys
-            "presence" and/or "abundance". Missing keys default to 0 for presence and None for abundance.
+            Dictionary mapping Feature objects (or feature ids) to dictionaries with
+            "presence" values. Missing presence values default to 0.
         combine : bool, optional
-            If True and the feature already exists, then:
-              - "presence" is combined using logical OR.
-              - "abundance" values are summed, treating None as 0.
+            If True and the feature already exists, "presence" is combined using logical OR.
             If False, the new values replace any existing data.
         reversibly : bool, optional
             Whether the change should be made reversible via an active HistoryManager. Default is True.
@@ -137,35 +133,16 @@ class Profile(Object):
                 raise TypeError("Key must be a Feature object or a feature id (str).")
                 
             new_presence = int(props.get("presence", 0))
-            # If abundance is not provided, default to None.
-            new_abundance_raw = props.get("abundance", None)
-            if new_abundance_raw is None:
-                new_abundance = None
-            else:
-                try:
-                    new_abundance = float(new_abundance_raw)
-                except (TypeError, ValueError):
-                    new_abundance = None
                 
             if feature in self._features:
                 if combine:
                     current_presence = self._features[feature]["presence"]
-                    # Use 0.0 when current abundance or new abundance is None.
-                    current_abundance = self._features[feature].get("abundance")
-                    current_abundance_val = current_abundance if current_abundance is not None else 0.0
-                    new_abundance_val = new_abundance if new_abundance is not None else 0.0
                     combined_presence = 1 if (current_presence or new_presence) else 0
-                    combined_abundance = current_abundance_val + new_abundance_val
                     self._features[feature]["presence"] = combined_presence
-                    # If both abundance values are None, keep it as None.
-                    if current_abundance is None and new_abundance is None:
-                        self._features[feature]["abundance"] = None
-                    else:
-                        self._features[feature]["abundance"] = combined_abundance
                 else:
-                    self._features[feature] = {"presence": new_presence, "abundance": new_abundance}
+                    self._features[feature] = {"presence": new_presence}
             else:
-                self._features[feature] = {"presence": new_presence, "abundance": new_abundance}
+                self._features[feature] = {"presence": new_presence}
                 # Link profile to the feature.
                 feature._profiles.add(self)
         
@@ -233,7 +210,7 @@ class Profile(Object):
         return self._model
     
     @property
-    def features(self) -> Dict[Feature, Dict[str, Union[int, Optional[float]]]]:
+    def features(self) -> Dict[Feature, Dict[str, int]]:
         """
         Retrieve all features associated with the profile.
         
@@ -262,35 +239,11 @@ class Profile(Object):
             canonical_features = list(self._features.keys())
         return [self._features.get(feat, {"presence": 0})["presence"] for feat in canonical_features]
         
-    @property
-    def abundance_vector(self) -> List[float]:
-        """
-        Get the abundance vector for the profile.
-        
-        Returns
-        -------
-        list of float
-            A list with the abundance values of each feature,
-            using the canonical order from model.features if available.
-            Missing abundance data (None) is converted to 0.0.
-        """
-        if self._model is not None:
-            canonical_features = self._model.features
-        else:
-            canonical_features = list(self._features.keys())
-        vector = []
-        for feat in canonical_features:
-            # Default to 0.0 if feature data is missing or abundance is None.
-            abundance = self._features.get(feat, {"abundance": 0.0})["abundance"]
-            vector.append(0.0 if abundance is None else abundance)
-        return vector
-        
     def __add__(self, other: "Profile") -> "Profile":
         """
         Combine two profiles by merging their feature data.
         
-        For features present in both profiles, "presence" is combined using logical OR
-        and "abundance" values are summed (treating None as 0).
+        For features present in both profiles, "presence" is combined using logical OR.
         
         Parameters
         ----------
@@ -304,7 +257,7 @@ class Profile(Object):
         """
         new_profile = self.copy()
         for feature, data in other._features.items():
-            new_data = {"presence": data["presence"], "abundance": data["abundance"]}
+            new_data = {"presence": data["presence"]}
             new_profile.add_features({feature: new_data}, combine=True, reversibly=False)
         return new_profile
         
@@ -324,52 +277,6 @@ class Profile(Object):
         """
         combined = self + other
         self._features = combined._features
-        return self
-        
-    def __mul__(self, coefficient: float) -> "Profile":
-        """
-        Generate a new profile with feature abundances scaled by a coefficient.
-        
-        Parameters
-        ----------
-        coefficient : float
-            Factor by which to scale the abundance values.
-            
-        Returns
-        -------
-        Profile
-            A new Profile with scaled feature abundances.
-        """
-        new_profile = self.copy()
-        for feature in new_profile._features:
-            current_abundance = new_profile._features[feature].get("abundance")
-            if current_abundance is not None:
-                new_profile._features[feature]["abundance"] = current_abundance * coefficient
-        return new_profile
-        
-    def __imul__(self, coefficient: float) -> "Profile":
-        """
-        Scale feature abundances in the profile in place.
-        
-        Parameters
-        ----------
-        coefficient : float
-            Factor to scale the abundance values.
-            
-        Returns
-        -------
-        Profile
-            Self, with scaled feature abundances.
-        """
-        for feature in self._features:
-            current_abundance = self._features[feature].get("abundance")
-            if current_abundance is not None:
-                self._features[feature]["abundance"] = current_abundance * coefficient
-        
-        context = get_context(self)
-        if context:
-            context(partial(self.__imul__, 1.0 / coefficient))
-            
         return self
         
     def copy(self) -> "Profile":

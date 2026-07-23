@@ -67,6 +67,8 @@ class BinaryGenetic(BinaryOptimizer):
         List of taxonomic levels to enforce. If not provided, the keys of taxonomy_constraints are used.
     required_genomes : list, optional
         List of candidate profiles (or their IDs) that must be included in the solution.
+    weights : optional
+        Explicit feature weights used when scoring target-feature coverage.
     absence_cover_penalty : float, optional
         Penalty multiplier applied when a candidate covers absent features.
     absence_match_reward : float, optional
@@ -93,8 +95,6 @@ class BinaryGenetic(BinaryOptimizer):
         Mapping from unified taxon keys to indices in the unified taxonomy matrix.
     T_unified : scipy.sparse.csr_matrix, optional
         The unified taxonomy matrix.
-    weighted : bool, optional
-        Whether to weight function selection by the abundance of functions in the target metagenome
     """
     
     def __init__(
@@ -107,6 +107,7 @@ class BinaryGenetic(BinaryOptimizer):
         fitness_threshold: Optional[float] = None,
         max_unchanged_generations: int = 1000,
         required_genomes: Optional[List[Union[str, Profile]]] = None,
+        weights: Optional[Any] = None,
         taxonomy_constraints: Optional[Dict[str, Any]] = None,
         taxonomic_levels: Optional[List[str]] = None,
         penalty_factor: float = 10.0,
@@ -115,7 +116,6 @@ class BinaryGenetic(BinaryOptimizer):
         absence_match_reward: float = 0,
         tournament_size: int = 10,
         seed: int = 42,
-        weighted: bool = False,
         exploration_rate: float = 0.2
     ) -> None:
         """
@@ -139,14 +139,14 @@ class BinaryGenetic(BinaryOptimizer):
             Maximum number of generations with no fitness improvement before termination.
         required_genomes : list of (str or Profile), optional
             Candidate profiles (or their IDs) that must be included.
+        weights : optional
+            Explicit feature weights. See :class:`BinaryOptimizer`.
         taxonomy_constraints : dict, optional
             Mapping of taxonomic level to per-taxon constraints.
         taxonomic_levels : list of str, optional
             List of taxonomic levels to enforce (defaults to taxonomy_constraints keys).
         penalty_factor : float, optional
             Weight factor used when penalizing constraint violations.
-        weights : np.ndarray, optional
-            Weights array for features; if provided, used in descriptive name.
         processes : int, optional
             Number of parallel processes for GA runs.
         absence_cover_penalty : float, optional
@@ -163,7 +163,7 @@ class BinaryGenetic(BinaryOptimizer):
         # Initialize the base optimizer.
         super().__init__(model=model, 
                          consortia_size=consortia_size, 
-                         weighted=weighted,
+                         weights=weights,
                          taxonomy_constraints=taxonomy_constraints,
                          taxonomic_levels=taxonomic_levels,
                          required_genomes=required_genomes,
@@ -298,7 +298,7 @@ class BinaryGenetic(BinaryOptimizer):
             A name constructed from key parameter flags.
         """
         parts = ["BinaryGenetic"]
-        if self.weights is not None:
+        if self.weighted:
             parts.append("Weighted")
         parts.append(f"ACP-{self.absence_cover_penalty}")
         parts.append(f"AMR-{self.absence_match_reward}")
@@ -1101,12 +1101,7 @@ class BinaryGenetic(BinaryOptimizer):
             A Solution object for a single sample or a list of Solutions for multiple samples.
         """
         d, s = self.M.shape
-        if self.weights is not None and self.weights.shape == (d, s):
-            W = self.weights
-        elif self.weights is not None:
-            W = np.tile(self.weights[:, 0], (s, 1)).T
-        else:
-            W = np.ones((d, s))
+        W = self.weights
         
         # Build argument list for parallel execution.
         args = [(self, self.M[:, i], W[:, i], i) for i in range(s)]
