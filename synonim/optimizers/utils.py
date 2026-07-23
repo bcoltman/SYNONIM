@@ -6,7 +6,6 @@
 # -----------------------------------------------------------------------------
 from scipy.sparse import coo_matrix
 import scipy.sparse as sp
-import numpy as np
 import math
 
 def generate_unified_taxonomy_matrix(genome_labels, taxonomic_levels):
@@ -66,36 +65,3 @@ def determine_domain_constraints(group_size, proportions=[0.85, 0.1, 0.05], labe
     constraints = {k: {"exact":v} for k, v in constraints.items()}
     
     return constraints
-
-
-def clr_transform(v: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:
-    """
-    Compute the centered log-ratio (CLR) transformation for a vector v.
-    
-    CLR(v)_i = log((v_i + epsilon) / g(v + epsilon))
-    where g(v + epsilon) is the geometric mean of (v + epsilon).
-    
-    Parameters
-    ----------
-    v : np.ndarray
-        Input abundance vector.
-    epsilon : float, optional
-        Small constant to avoid log(0).
-        
-    Returns
-    -------
-    np.ndarray
-        CLR-transformed vector.
-    
-    Notes
-    -----
-    The CLR transform is computed as:
-    
-        CLR(v)_i = log((v_i + epsilon) / g(v + epsilon))
-    
-    where g(v + epsilon) is the geometric mean of (v + epsilon).
-    """
-    v_shift = v + epsilon
-    # Compute geometric mean. Using log-average exp.
-    geom_mean = np.exp(np.mean(np.log(v_shift)))
-    return np.log(v_shift / geom_mean)

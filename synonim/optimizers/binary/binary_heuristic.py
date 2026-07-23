@@ -16,8 +16,8 @@ class BinaryHeuristic(BinaryOptimizer):
     Heuristic optimizer for multi-level genome selection under taxonomy constraints.
     
     This optimizer selects candidate genome profiles one-by-one via a heuristic search.
-    It relies on binary matrices describing the metagenome (targets) and genome (candidate)
-    feature presence, as well as an abundance matrix used for weighting.
+    It relies on binary matrices describing the metagenome targets and candidate
+    genome feature presence.
     
     Attributes
     ----------
@@ -41,6 +41,8 @@ class BinaryHeuristic(BinaryOptimizer):
         List of taxonomic levels to enforce. If not provided, the keys of taxonomy_constraints are used.
     required_genomes : list, optional
         List of candidate profiles (or their IDs) that must be included in the solution.
+    weights : optional
+        Explicit feature weights used when scoring target-feature coverage.
     absence_cover_penalty : float, optional
         Penalty multiplier applied when a candidate covers absent features.
     absence_match_reward : float, optional
@@ -51,18 +53,16 @@ class BinaryHeuristic(BinaryOptimizer):
         Whether to mask features with present coverage after a candidate is selected.
     mask_covered_isolate_features : bool, optional
         Whether to remove candidate signals for entire features when a candidate covers them.
-    weighted : bool, optional
-        Whether to weight function selection by the abundance of functions in the target metagenome
     """
     
     def __init__(
         self,
         model: Model,
         consortia_size: int,
-        weighted: bool = False,
         taxonomy_constraints: Optional[Dict[str, Any]] = None,
         taxonomic_levels: Optional[List[str]] = None,
         required_genomes: Optional[List[Union[str, Profile]]] = None,
+        weights: Optional[Any] = None,
         absence_cover_penalty: float = 0,
         absence_match_reward: float = 1,
         mask_covered_absent_features: bool = False,
@@ -75,7 +75,7 @@ class BinaryHeuristic(BinaryOptimizer):
         Parameters
         ----------
         model : Model
-            The model instance supplying profiles and binary/abundance matrices.
+            The model instance supplying profiles and binary matrices.
         consortia_size : int
             The target number of candidate profiles to select.
         taxonomy_constraints : dict, optional
@@ -84,6 +84,8 @@ class BinaryHeuristic(BinaryOptimizer):
             List of taxonomic levels to enforce; if None, defaults to the keys of taxonomy_constraints.
         required_genomes : list of (str or Profile), optional
             Candidate profiles (or their IDs) that must be included.
+        weights : optional
+            Explicit feature weights. See :class:`BinaryOptimizer`.
         absence_cover_penalty : float, optional
             Multiplier penalty for candidate features that cover absent features.
         absence_match_reward : float, optional
@@ -98,7 +100,7 @@ class BinaryHeuristic(BinaryOptimizer):
         # Initialize the base optimizer.
         super().__init__(model=model, 
                          consortia_size=consortia_size, 
-                         weighted=weighted,
+                         weights=weights,
                          taxonomy_constraints=taxonomy_constraints,
                          taxonomic_levels=taxonomic_levels,
                          required_genomes=required_genomes,
@@ -120,8 +122,7 @@ class BinaryHeuristic(BinaryOptimizer):
             A concatenation of flags and parameters (e.g., "BinaryHeuristic_Weighted_MA_MP_AMR-1_ACP-0").
         """
         name_parts = ["BinaryHeuristic"]
-        # Optionally, if weighted analysis is applied.
-        if hasattr(self, "weights") and self.weights is not None:
+        if self.weighted:
             name_parts.append("Weighted")
         if self.mask_covered_absent_features:
             name_parts.append("MA")  # mask absent
@@ -140,7 +141,6 @@ class BinaryHeuristic(BinaryOptimizer):
         Execute the heuristic optimization to select candidate profiles.
         
         For each sample (column in the target matrix), the algorithm:
-          - Determines candidate weights.
           - Applies required selections (if any).
           - Iteratively selects additional candidates based on computed scores,
             enforcing taxonomic constraints.
@@ -165,13 +165,7 @@ class BinaryHeuristic(BinaryOptimizer):
             
             start_time = time.time()
             
-            # Determine per-feature weights for the current sample.
-            if self.weights is not None and self.weights.shape == (d, s):
-                current_weights = self.weights[:, sample_idx]
-            elif self.weights is not None:
-                current_weights = self.weights[:, 0]
-            else:
-                current_weights = np.ones(d)
+            current_weights = self.weights[:, sample_idx]
                 
             # Create a working copy of the candidate matrix locally.
             isolates = self.G.copy()
@@ -346,7 +340,7 @@ class BinaryHeuristic(BinaryOptimizer):
         Compute candidate scores based on feature matching.
         
         Scores are determined by:
-          - The dot product of the candidate matrix (isolates) with the weighted indicator of present target features.
+          - The dot product of the candidate matrix (isolates) with present target features.
           - Adding a reward for matching absent features.
           - Subtracting a penalty for covering absent features.
           
@@ -355,7 +349,7 @@ class BinaryHeuristic(BinaryOptimizer):
         status : np.ndarray
             Vector (length d) indicating for each feature if it is present (1) or absent (2) in the target.
         weights : np.ndarray
-            Weights for each feature (from the abundance matrix).
+            Weights for each feature.
         isolates : np.ndarray
             The working copy of the candidate matrix.
             

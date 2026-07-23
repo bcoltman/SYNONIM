@@ -4,15 +4,16 @@ Base classes for optimizers.
 
 These classes define common functionality for optimizers that operate on a Model
 instance. Optimizers aim to select a consortia of profiles that meet specific targets,
-whether based on binary presence/absence or abundance data. Specialized solvers should
-inherit from these base classes.
+based on binary presence/absence data. Specialized solvers should inherit from these
+base classes.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 import time
 import numpy as np
 import logging
-from typing import Any, Dict, Iterable, List, Union, Optional
+from typing import Any, Dict, List, Union, Optional
 from synonim.core import Model, Profile
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ class BinaryOptimizer(BaseOptimizer):
     def __init__(self, 
                  model: Model, 
                  consortia_size: int,
-                 weighted: bool = False,
+                 weights: Optional[Any] = None,
                  taxonomy_constraints: Optional[Dict[str, Any]] = None,
                  taxonomic_levels: Optional[List[str]] = None,
                  required_genomes: Optional[List[Union[str, Profile]]] = None,
@@ -150,8 +151,10 @@ class BinaryOptimizer(BaseOptimizer):
             The model instance supplying profiles and matrices.
         consortia_size : int
             Number of candidate profiles to select.
-        weighted : bool, optional
-            Whether to weight function selection by the abundance of functions in the target metagenome
+        weights : optional
+            Explicit feature weights for the binary objective. Accepts a mapping keyed by
+            feature ID, a 1-D array-like of length ``n_features``, or a 2-D array-like
+            with shape ``(n_features, n_metagenomes)``. Missing mapping keys default to 1.
         taxonomy_constraints : dict, optional
             Mapping of taxonomic level to per-taxon constraints.
         taxonomic_levels : list of str, optional
@@ -191,13 +194,56 @@ class BinaryOptimizer(BaseOptimizer):
             )
         
         
-        # Retrieve binary matrices and weights from the model.
+        # Retrieve binary matrices from the model.
         self.M = self.model.metagenome_binary_matrix.copy()  # Target matrix: features x samples
         self.G = self.model.genome_binary_matrix.copy()       # Candidate matrix: features x candidates
-        
-        self.weights = None
-        if weighted:
-            self.weights = self.model.metagenome_abundance_matrix.copy()  # Abundance weights: features x samples
+        self.weighted = weights is not None
+        self.weights = self._normalize_weights(weights)
+
+    def _normalize_weights(self, weights: Optional[Any]) -> np.ndarray:
+        """
+        Return a non-negative feature-by-sample weight matrix aligned to model features.
+
+        Weights are intentionally independent of any particular biological quantity: callers may
+        supply measurement-derived weights, confidence weights, benchmarking weights, or plain
+        feature priorities as long as they align with the model feature order.
+        """
+        d, s = self.M.shape
+        if weights is None:
+            return np.ones((d, s), dtype=float)
+
+        feature_ids = [feature.id for feature in self.model.features]
+        sample_names = self.metagenome_names
+
+        if hasattr(weights, "reindex") and hasattr(weights, "columns"):
+            aligned = weights.reindex(index=feature_ids, columns=sample_names)
+            values = aligned.fillna(1.0).to_numpy(dtype=float)
+        elif hasattr(weights, "reindex") and hasattr(weights, "index") and not hasattr(weights, "columns"):
+            aligned = weights.reindex(feature_ids)
+            values = aligned.fillna(1.0).to_numpy(dtype=float)
+        elif isinstance(weights, Mapping):
+            values = np.array([float(weights.get(feature_id, 1.0)) for feature_id in feature_ids], dtype=float)
+        else:
+            values = np.asarray(weights, dtype=float)
+
+        if values.ndim == 1:
+            if values.shape[0] != d:
+                raise ValueError(f"Feature weights must have length {d}; received {values.shape[0]}.")
+            values = np.tile(values.reshape(-1, 1), (1, s))
+        elif values.ndim == 2:
+            if values.shape == (d, 1):
+                values = np.tile(values, (1, s))
+            elif values.shape != (d, s):
+                raise ValueError(f"Feature weights must have shape {(d, s)}; received {values.shape}.")
+        else:
+            raise ValueError("Feature weights must be one- or two-dimensional.")
+
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Feature weights must be finite numeric values.")
+        if np.any(values < 0):
+            raise ValueError("Feature weights must be non-negative.")
+
+        return values.astype(float, copy=False)
         
     @property
     def optimizer_type(self) -> str:
@@ -277,16 +323,6 @@ class BinaryOptimizer(BaseOptimizer):
                             - results["FP"] * self.absence_cover_penalty 
                             + results["TN"] * self.absence_match_reward)
             
-            
-            if self.weights is not None:
-                if self.weights.ndim == 1 or self.weights.shape[1] == 1:
-                    W_sample = self.weights.flatten()
-                else:
-                    W_sample = self.weights[:, 0]
-                # Compute weighted version of the counts
-                weighted_TP = np.sum((T_bool.astype(int) & np.sign(np.dot(self.G, x_single)).astype(int)) * W_sample)
-                weighted_FP = np.sum(((~T_bool).astype(int) & np.sign(np.dot(self.G, x_single)).astype(int)) * W_sample)
-                results["weighted_precision"] = weighted_TP / (weighted_TP + weighted_FP) if (weighted_TP + weighted_FP) != 0 else 0.0
             
             # Optionally, add taxonomic counts if available.
             if self.taxonomy_constraints and hasattr(self.model, "get_genome_labels"):
@@ -379,152 +415,6 @@ class BinaryOptimizer(BaseOptimizer):
     def __repr__(self) -> str:
         """
         Return a string representation of the BinaryOptimizer.
-        
-        Returns
-        -------
-        str
-            A string indicating the optimizer type and consortia size.
-        """
-        return f"<{self.__class__.__name__}(consortia_size={self.consortia_size}, optimizer_type={self.optimizer_type})>"
-
-
-class AbundanceOptimizer(BaseOptimizer):
-    """
-    Base class for optimizers that work with abundance data.
-    
-    This class defines methods specific to evaluating and reporting solutions in an
-    abundance-based optimization context. It serves as a foundation for solvers that
-    leverage continuous abundance values.
-    """
-    
-    def __init__(self, 
-                 model: Model, 
-                 consortia_size: int,
-                 taxonomy_constraints: Optional[Dict[str, Any]] = None,
-                 taxonomic_levels: Optional[List[str]] = None,
-                 required_genomes: Optional[List[Union[str, Profile]]] = None) -> None:
-        """
-        Initialize the AbundanceOptimizer.
-        
-        Parameters
-        ----------
-        model : Model
-            The model instance supplying genome and metagenome profiles.
-        consortia_size : int
-            The desired number of candidate profiles to select.
-        """
-        super().__init__(model, consortia_size)
-        
-        self._optimizer_type = "abundance"
-        
-        self.taxonomy_constraints = taxonomy_constraints
-        if taxonomy_constraints:
-            # take user‐provided list if any, otherwise the dict keys
-            initial = taxonomic_levels if taxonomic_levels is not None else list(taxonomy_constraints.keys())
-            # only keep those in the canonical hierarchy, in the correct order
-            self.taxonomic_levels = [lvl for lvl in DEFAULT_RANKS if lvl in initial]
-        else:
-            self.taxonomic_levels = None
-        
-        # Convert the user-passed required_genomes to candidate indices.
-        self.required_genomes = self._resolve_required_genomes(required_genomes)
-        
-        # Retrieve taxonomy labels and genome names from the model.
-        self.genome_labels = self.model.get_genome_labels(self.taxonomic_levels)
-        
-        # Retrieve matrices from the model.
-        self.M = self.model.metagenome_abundance_matrix.copy()  # Target matrix: features x samples
-        self.G = self.model.genome_abundance_matrix.copy()       # Candidate matrix: features x candidates
-        
-    @property
-    def optimizer_type(self) -> str:
-        """
-        Get the type of the optimizer.
-        
-        Returns
-        -------
-        str
-            A string indicating the optimizer type (e.g., "abundance").
-        """
-        return self._optimizer_type
-    
-    def analyze_solution(
-        self,
-        T: np.ndarray,
-        p_opt: np.ndarray,
-        x_opt: np.ndarray
-    ) -> Dict[str, Any]:
-        """
-        Analyze an abundance-based optimization solution.
-        
-        Parameters
-        ----------
-        T : np.ndarray
-            CLR-transformed target profile (shape d,).
-        p_opt : np.ndarray
-            Optimized continuous abundance vector (length n).
-        x_opt : np.ndarray
-            Optimized binary vector indicating selected profiles (length n).
-            
-        Returns
-        -------
-        dict
-            Dictionary of analysis metrics: distance, correlation, abundance use, taxonomy.
-        """
-        
-        v = self.G @ p_opt.reshape(-1, 1)
-        v = v.flatten()
-        v_shift = v + self.epsilon
-        y = np.log(v_shift)
-        avg_y = np.mean(y)
-        c = y - avg_y
-        
-        mse = np.sum((c - T) ** 2)
-        mae = np.mean(np.abs(c - T))
-        corr = np.corrcoef(c, T)[0, 1] if np.std(c) > 0 and np.std(T) > 0 else 0.0
-        total_abundance = np.sum(p_opt)
-        
-        results: Dict[str, Any] = {
-            "MSE": float(mse),
-            "MAE": float(mae),
-            "Pearson_correlation": float(corr),
-            "Total_abundance": float(total_abundance),
-        }
-        
-        
-        if self.taxonomy_constraints and self.genome_labels:
-            selected_taxa = {}
-            labels = self.genome_labels
-            
-            for idx in np.where(x_opt == 1)[0]:
-                label = labels[idx]
-                for level in self.taxonomic_levels:
-                    key = label.get(level, "Unknown") if isinstance(label, dict) else "Unknown"
-                    selected_taxa.setdefault(level, {})
-                    selected_taxa[level][key] = selected_taxa[level].get(key, 0) + 1
-            
-            results["Taxonomic_counts"] = selected_taxa
-            
-        return results
-        
-    @abstractmethod
-    def optimize(self) -> Any:
-        """
-        Optimize the model using an abundance-based approach.
-        
-        This method should be implemented by subclasses with the specific abundance
-        optimization logic.
-        
-        Returns
-        -------
-        Any
-            The result of the abundance optimization procedure.
-        """
-        pass
-        
-    def __repr__(self) -> str:
-        """
-        Return a string representation of the AbundanceOptimizer.
         
         Returns
         -------

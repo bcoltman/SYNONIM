@@ -23,7 +23,7 @@ class Model(Object):
     the model may (optionally) remove orphan features.
     
     Candidate matrices and metadata (e.g., genome_names and genome_labels) are derived from the 
-    ordered list of profiles and features. Matrix properties (binary and abundance) are cached
+    ordered list of profiles and features. Binary matrix properties are cached
     after first computation. When the model is modified (e.g. adding/removing profiles or features),
     the caches are invalidated automatically.
     
@@ -65,18 +65,14 @@ class Model(Object):
             self._contexts: List[Any] = []                           # For reversible changes.
             # Cached matrices; set to None to indicate cache invalidation.
             self._genome_binary_matrix_cache: Optional[np.ndarray] = None
-            self._genome_abundance_matrix_cache: Optional[np.ndarray] = None
             self._metagenome_binary_matrix_cache: Optional[np.ndarray] = None
-            self._metagenome_abundance_matrix_cache: Optional[np.ndarray] = None
             
     def _invalidate_cache(self) -> None:
         """
         Invalidate cached matrices. This is called automatically whenever the model state changes.
         """
         self._genome_binary_matrix_cache = None
-        self._genome_abundance_matrix_cache = None
         self._metagenome_binary_matrix_cache = None
-        self._metagenome_abundance_matrix_cache = None
         
     def __getstate__(self) -> Dict:
         """
@@ -93,9 +89,7 @@ class Model(Object):
         odict["_contexts"] = []
         # Do not pickle the caches.
         # odict["_genome_binary_matrix_cache"] = None
-        # odict["_genome_abundance_matrix_cache"] = None
         # odict["_metagenome_binary_matrix_cache"] = None
-        # odict["_metagenome_abundance_matrix_cache"] = None
         return odict
         
     def __setstate__(self, state: Dict) -> None:
@@ -341,48 +335,6 @@ class Model(Object):
         return mat
         
     @property
-    def genome_abundance_matrix(self) -> np.ndarray:
-        """
-        Generate and cache the abundance matrix for genome profiles.
-        
-        Rows correspond to features; columns to genome profiles.
-        Each value corresponds to the 'abundance' stored in the profile's feature data.
-        
-        Returns
-        -------
-        np.ndarray
-        A matrix of shape (num_features, num_genome_profiles).
-        """
-        if self._genome_abundance_matrix_cache is not None:
-            return self._genome_abundance_matrix_cache
-        
-        n_features = len(self.features)
-        n_profiles = len(self.genome_profiles)
-        
-        feat_to_idx = {f: i for i, f in enumerate(self.features)}
-        prof_to_idx = {p: j for j, p in enumerate(self.genome_profiles)}
-        
-        rows, cols, data = [], [], []
-        
-        for profile in self.genome_profiles:
-            j = prof_to_idx[profile]
-            for feat, feat_dict in profile.features.items():
-                i = feat_to_idx.get(feat)
-                if i is not None:
-                    abundance = feat_dict.get("abundance", 0.0)
-                    if abundance:
-                        rows.append(i)
-                        cols.append(j)
-                        data.append(abundance)
-        
-        mat = np.zeros((n_features, n_profiles), dtype=float)
-        mat[rows, cols] = data
-        
-        self._genome_abundance_matrix_cache = mat
-        return mat
-        
-        
-    @property
     def metagenome_binary_matrix(self) -> np.ndarray:
         """
         Generate and cache the binary matrix for metagenome profiles.
@@ -423,47 +375,6 @@ class Model(Object):
         mat[rows, cols] = data
                     
         self._metagenome_binary_matrix_cache = mat
-        return mat
-        
-    @property
-    def metagenome_abundance_matrix(self) -> np.ndarray:
-        """
-        Generate and cache the abundance matrix for metagenome profiles.
-        
-        Rows correspond to features; columns to metagenome profiles.
-        Each value corresponds to the 'abundance' stored in the profile's feature data.
-        
-        Returns
-        -------
-        np.ndarray
-            A matrix of shape (num_features, num_metagenome_profiles).
-        """
-        if self._metagenome_abundance_matrix_cache is not None:
-            return self._metagenome_abundance_matrix_cache
-            
-        n_features = len(self.features)
-        n_samples = len(self.metagenome_profiles)
-        
-        feat_to_idx = {f: i for i, f in enumerate(self.features)}
-        prof_to_idx = {p: j for j, p in enumerate(self.metagenome_profiles)}
-        
-        rows, cols, data = [], [], []
-        
-        for profile in self.metagenome_profiles:
-            j = prof_to_idx[profile]
-            for feat, feat_dict in profile.features.items():
-                i = feat_to_idx.get(feat)
-                if i is not None:
-                    abundance = feat_dict.get("abundance", 0.0)
-                    if abundance:
-                        rows.append(i)
-                        cols.append(j)
-                        data.append(abundance)
-                        
-        mat = np.zeros((n_features, n_samples), dtype=float)
-        mat[rows, cols] = data
-        
-        self._metagenome_abundance_matrix_cache = mat
         return mat
         
     @property

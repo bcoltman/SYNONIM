@@ -48,12 +48,12 @@ class BinaryMILP(BinaryOptimizer):
         consortia_size: int,
         processes: int = 1,
         required_genomes: Optional[List[Union[str, Profile]]] = None,
+        weights: Optional[Any] = None,
         absence_cover_penalty: float = 1,
         absence_match_reward: float = 0,
         taxonomy_constraints: Optional[Dict[str, Any]] = None,
         taxonomic_levels: Optional[List[str]] = None,
-        time_limit: float = 3600,
-        weighted: bool = False
+        time_limit: float = 3600
     ) -> None:
         """
         Initialize the MILP optimizer.
@@ -68,6 +68,8 @@ class BinaryMILP(BinaryOptimizer):
             Number of parallel threads for the MILP solver.
         required_genomes : list of (str or Profile), optional
             Candidate profiles (or their IDs) that must be selected.
+        weights : optional
+            Explicit feature weights. See :class:`BinaryOptimizer`.
         absence_cover_penalty : float, optional
             Penalty multiplier for covering absent features.
         absence_match_reward : float, optional
@@ -79,13 +81,11 @@ class BinaryMILP(BinaryOptimizer):
             defaults to the keys of taxonomy_constraints.
         time_limit : float, optional
             Time limit (in seconds) for the solver.
-        weighted : bool, optional
-            Whether to weight function selection by the abundance of functions in the target metagenome
         """
                 # Initialize the base optimizer.
         super().__init__(model=model, 
                          consortia_size=consortia_size, 
-                         weighted=weighted,
+                         weights=weights,
                          taxonomy_constraints=taxonomy_constraints,
                          taxonomic_levels=taxonomic_levels,
                          required_genomes=required_genomes,
@@ -120,7 +120,7 @@ class BinaryMILP(BinaryOptimizer):
             A descriptive name constructed from key parameter flags.
         """
         parts = ["MILPOptimizer"]
-        if hasattr(self, "weights") and self.weights is not None:
+        if self.weighted:
             parts.append("Weighted")
         parts.append(f"ACP-{self.absence_cover_penalty}")
         parts.append(f"AMR-{self.absence_match_reward}")
@@ -147,6 +147,7 @@ class BinaryMILP(BinaryOptimizer):
         # Set Gurobi solver parameters.
         
         model_gp.Params.Threads = self.processes
+        model_gp.Params.OutputFlag = 0
         model_gp.Params.Seed = 42
         model_gp.Params.Presolve = 0
         model_gp.Params.PrePasses = 0
@@ -315,7 +316,7 @@ class BinaryMILP(BinaryOptimizer):
             model_gp.Params.ScenarioNumber = scenario
             model_gp.ScenNName = f"Scenario_{scenario}"
             m_obs = self.M[:, scenario]
-            w_obs = np.ones(d) if self.weights is None else self.weights[:, scenario]
+            w_obs = self.weights[:, scenario]
             c = 2 * w_obs * m_obs - (self.absence_cover_penalty + self.absence_match_reward) * (1 - m_obs)
             # Set scenario-specific objective coefficients for gene coverage.
             B.ScenNObj = np.array(c)
