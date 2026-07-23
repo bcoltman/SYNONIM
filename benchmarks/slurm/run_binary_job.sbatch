@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="${SYNONIM_BENCHMARK_REPO_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 : "${SYNONIM_BENCHMARK_PROFILE:?Set SYNONIM_BENCHMARK_PROFILE to tiny, medium, recovery, or large.}"
 : "${SYNONIM_BENCHMARK_STRATEGY:?Set SYNONIM_BENCHMARK_STRATEGY to mimic_v1, heuristic, genetic, or milp.}"
