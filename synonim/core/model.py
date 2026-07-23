@@ -167,9 +167,9 @@ class Model(Object):
         # Record a reversible action (if in a context) to remove the profile.
         context = get_context(self)
         if context:
-            context(partial(self.profiles.remove, profile))
-            context(partial(setattr, profile, "_model", None))
             context(self._classify_profiles)
+            context(partial(setattr, profile, "_model", None))
+            context(partial(self.profiles.remove, profile))
         
         profile._model = self
         self.profiles.append(profile)
@@ -207,9 +207,9 @@ class Model(Object):
             if profile in self.profiles:
                 # Record reversal action if in a context.
                 if context:
-                    context(partial(self.profiles.append, profile))
-                    context(partial(setattr, profile, "_model", self))
                     context(self._classify_profiles)
+                    context(partial(setattr, profile, "_model", self))
+                    context(partial(self.profiles.append, profile))
                 self.profiles.remove(profile)
                 profile._model = None
             else:
