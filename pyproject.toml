@@ -41,6 +41,7 @@ Tracker = "https://github.com/bcoltman/synonim/issues"
 [project.optional-dependencies]
 dev = ["pytest", "black", "isort", "mypy"]
 milp = ["gurobipy"]
+benchmark = ["matplotlib", "seaborn"]
 
 [tool.pytest.ini_options]
 markers = [
