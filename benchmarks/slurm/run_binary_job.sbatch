@@ -49,4 +49,8 @@ if [[ -n "${SYNONIM_BENCHMARK_PROCESSES:-}" ]]; then
   ARGS+=(--processes "${SYNONIM_BENCHMARK_PROCESSES}")
 fi
 
+if [[ -n "${SYNONIM_BENCHMARK_GUROBI_TIME_LIMIT:-}" ]]; then
+  ARGS+=(--time-limit "${SYNONIM_BENCHMARK_GUROBI_TIME_LIMIT}")
+fi
+
 python "${ARGS[@]}"

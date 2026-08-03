@@ -85,6 +85,9 @@ python benchmarks/run_binary_optimizers.py \
   --absence-match-reward 0
 ```
 
+Override the profile's MILP solver limit for a local run with
+`--time-limit <seconds>`. This accepts a finite positive number of seconds.
+
 Run one filtered large historical job:
 
 ```bash
@@ -176,12 +179,19 @@ Default resources preserve the historical settings:
 - MiMiC v1: 1 CPU, 50G memory, 12 hours.
 - Heuristic: 1 CPU, 50G memory, 12 hours.
 - Genetic: 8 CPU, 50G memory, 12 hours.
-- MILP: 8 CPU, 250G memory, 1 day.
+- MILP: 8 CPU, 250G memory, 1 day for SLURM and 19 hours 12 minutes for
+  the multi-scenario Gurobi solve.
 
 Override them with `SYNONIM_BENCHMARK_HEURISTIC_CPUS`,
 `SYNONIM_BENCHMARK_HEURISTIC_MEM`, `SYNONIM_BENCHMARK_HEURISTIC_TIME`, and the
 corresponding `SYNONIM_BENCHMARK_V1_*`, `SYNONIM_BENCHMARK_GENETIC_*`,
 or `SYNONIM_BENCHMARK_MILP_*` variables.
+
+For submitted MILP jobs, the launcher converts `SYNONIM_BENCHMARK_MILP_TIME`
+to seconds and overrides the profile's solver limit with exactly 80% of that
+allocation. The remaining 20% is reserved for setup, heuristic warm starts,
+result processing, and shutdown. Direct local runs continue to use the profile
+limit unless `--time-limit` is supplied explicitly.
 
 ## Local Artifacts
 

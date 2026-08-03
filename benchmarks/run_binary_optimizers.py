@@ -45,12 +45,27 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--absence-match-reward", action="append", type=float, dest="amrs")
     cli.add_argument("--heuristic-mask-key", action="append", dest="mask_keys")
     cli.add_argument("--processes", type=int, help="Override genetic/MILP process count.")
+    cli.add_argument(
+        "--time-limit",
+        type=positive_float,
+        help="Override the MILP solver time limit in seconds.",
+    )
     cli.add_argument("--dry-run", action="store_true", help="Print expanded jobs without optimizing.")
     return cli
 
 
 def build_parser() -> argparse.ArgumentParser:
     return parser()
+
+
+def positive_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not np.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number greater than zero")
+    return number
 
 
 def load_profiles(path: Path = PROFILE_PATH) -> dict[str, Any]:
@@ -288,8 +303,6 @@ def run_genetic(model: Any, job: Mapping[str, Any]):
 
 def run_milp(
     model: Any,
-    genomes: pd.DataFrame,
-    metagenomes: pd.DataFrame,
     job: Mapping[str, Any],
 ):
     try:
@@ -297,29 +310,25 @@ def run_milp(
     except ImportError as exc:
         raise RuntimeError("MILP benchmarks require the `milp` extra and Gurobi.") from exc
 
-    if job.get("warm_start") != "heuristic":
-        return BinaryMILP(
+    optimizer = BinaryMILP(
+        model=model,
+        **common_optimizer_args(job),
+        processes=int(job["processes"]),
+        time_limit=float(job["time_limit"]),
+    )
+    if job.get("warm_start") == "heuristic":
+        warm_solutions = BinaryHeuristic(
             model=model,
             **common_optimizer_args(job),
-            processes=int(job["processes"]),
-            time_limit=float(job["time_limit"]),
+            mask_covered_absent_features=True,
+            mask_covered_present_features=True,
+            mask_covered_isolate_features=True,
         ).optimize()
-
-    solutions = []
-    for scenario_index, scenario_name in enumerate(metagenomes.columns):
-        scenario_model = build_model(genomes, metagenomes.loc[:, [scenario_name]])
-        warm_solution = run_heuristic(scenario_model, job)
-        optimizer = BinaryMILP(
-            model=scenario_model,
-            **common_optimizer_args(job),
-            processes=int(job["processes"]),
-            time_limit=float(job["time_limit"]),
-        )
-        optimizer.warmup(np.asarray(warm_solution.X_opt, dtype=int))
-        solution = optimizer.optimize()
-        solution.details["scenario"] = scenario_index
-        solutions.append(solution)
-    return solutions[0] if len(solutions) == 1 else solutions
+        if not isinstance(warm_solutions, list):
+            warm_solutions = [warm_solutions]
+        for warm_solution in warm_solutions:
+            optimizer.warmup(np.asarray(warm_solution.X_opt, dtype=int))
+    return optimizer.optimize()
 
 
 def run_job(
@@ -335,7 +344,7 @@ def run_job(
     if job["strategy"] == "genetic":
         return run_genetic(model, job)
     if job["strategy"] == "milp":
-        return run_milp(model, genomes, metagenomes, job)
+        return run_milp(model, job)
     raise ValueError(f"Unknown strategy {job['strategy']!r}.")
 
 
@@ -465,6 +474,19 @@ def job_line(job: Mapping[str, Any]) -> str:
     return " ".join(fields)
 
 
+def apply_job_overrides(
+    jobs: Sequence[dict[str, Any]],
+    *,
+    processes: int | None = None,
+    time_limit: float | None = None,
+) -> None:
+    for job in jobs:
+        if processes is not None and job["strategy"] in {"genetic", "milp"}:
+            job["processes"] = processes
+        if time_limit is not None and job["strategy"] == "milp":
+            job["time_limit"] = time_limit
+
+
 def utc_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -480,10 +502,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         absence_match_rewards=args.amrs,
         heuristic_mask_keys=args.mask_keys,
     )
-    if args.processes is not None:
-        for job in jobs:
-            if job["strategy"] in {"genetic", "milp"}:
-                job["processes"] = args.processes
+    apply_job_overrides(jobs, processes=args.processes, time_limit=args.time_limit)
     if not jobs:
         raise SystemExit("No benchmark jobs matched the requested filters.")
 

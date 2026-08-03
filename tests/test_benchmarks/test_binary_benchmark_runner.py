@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -35,6 +37,14 @@ def assert_restricted_gurobi_size(profile):
 def test_run_binary_optimizers_requires_explicit_profile():
     with pytest.raises(SystemExit):
         run_binary_optimizers.build_parser().parse_args([])
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_time_limit_override_must_be_positive_and_finite(value):
+    with pytest.raises(SystemExit):
+        run_binary_optimizers.build_parser().parse_args(
+            ["--profile", "large", "--time-limit", value]
+        )
 
 
 def test_four_canonical_profiles_are_available():
@@ -73,6 +83,76 @@ def test_medium_and_recovery_profiles_expand_full_local_grids():
         assert len(mimic_v1_jobs) == 3
         assert milp_jobs[0]["time_limit"] == 300
         assert_restricted_gurobi_size(profile)
+
+
+def test_job_overrides_apply_time_limit_only_to_milp():
+    jobs = [
+        {"strategy": "heuristic"},
+        {"strategy": "genetic", "processes": 1},
+        {"strategy": "milp", "processes": 1, "time_limit": 300},
+    ]
+
+    run_binary_optimizers.apply_job_overrides(jobs, processes=8, time_limit=69120)
+
+    assert "time_limit" not in jobs[0]
+    assert jobs[1] == {"strategy": "genetic", "processes": 8}
+    assert jobs[2] == {"strategy": "milp", "processes": 8, "time_limit": 69120}
+
+
+def test_milp_uses_one_multi_scenario_solve_with_all_heuristic_starts(monkeypatch):
+    import synonim.optimizers.binary as binary_optimizers
+
+    heuristic_calls = []
+
+    class FakeHeuristic:
+        def __init__(self, **kwargs):
+            heuristic_calls.append(kwargs)
+
+        def optimize(self):
+            return [SimpleNamespace(X_opt=[1, 0]), SimpleNamespace(X_opt=[0, 1])]
+
+    class FakeMILP:
+        instances = []
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.starts = []
+            self.optimize_calls = 0
+            self.__class__.instances.append(self)
+
+        def warmup(self, solution):
+            self.starts.append(solution)
+
+        def optimize(self):
+            self.optimize_calls += 1
+            return "multi-scenario-result"
+
+    monkeypatch.setattr(run_binary_optimizers, "BinaryHeuristic", FakeHeuristic)
+    monkeypatch.setitem(binary_optimizers.__dict__, "BinaryMILP", FakeMILP)
+    model = object()
+    job = {
+        "consortia_size": 3,
+        "absence_cover_penalty": 1,
+        "absence_match_reward": 0,
+        "processes": 8,
+        "time_limit": 69120,
+        "warm_start": "heuristic",
+    }
+
+    result = run_binary_optimizers.run_milp(model, job)
+
+    assert result == "multi-scenario-result"
+    assert len(FakeMILP.instances) == 1
+    optimizer = FakeMILP.instances[0]
+    assert optimizer.kwargs["model"] is model
+    assert optimizer.kwargs["time_limit"] == 69120
+    assert optimizer.optimize_calls == 1
+    assert [start.tolist() for start in optimizer.starts] == [[1, 0], [0, 1]]
+    assert len(heuristic_calls) == 1
+    assert heuristic_calls[0]["model"] is model
+    assert heuristic_calls[0]["mask_covered_absent_features"] is True
+    assert heuristic_calls[0]["mask_covered_present_features"] is True
+    assert heuristic_calls[0]["mask_covered_isolate_features"] is True
 
 
 def test_tiny_benchmark_writes_stable_summaries(tmp_path):
