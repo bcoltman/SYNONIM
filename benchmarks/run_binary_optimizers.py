@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import itertools
 import json
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -39,6 +41,11 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--output-dir", type=Path)
     cli.add_argument("--summary-prefix", default=SUMMARY_PREFIX)
     cli.add_argument("--run-id")
+    cli.add_argument(
+        "--plan-output",
+        type=Path,
+        help="Write the expanded logical-job manifest as JSON.",
+    )
     cli.add_argument("--strategy", action="append", choices=STRATEGIES, dest="strategies")
     cli.add_argument("--consortia-size", action="append", type=int, dest="sizes")
     cli.add_argument("--absence-cover-penalty", action="append", type=float, dest="acps")
@@ -96,6 +103,44 @@ def heuristic_mask_key(job: Mapping[str, Any]) -> str:
         f"mp{int(bool(job.get('mask_covered_present_features', False)))}-"
         f"mi{int(bool(job.get('mask_covered_isolate_features', False)))}"
     )
+
+
+JOB_IDENTITY_EXCLUDED_FIELDS = {"profile", "processes", "time_limit"}
+
+
+def job_key(job: Mapping[str, Any]) -> str:
+    """Return a stable identifier for a scientific benchmark configuration."""
+    identity = {
+        key: value
+        for key, value in job.items()
+        if key not in JOB_IDENTITY_EXCLUDED_FIELDS
+    }
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+    return f"{job['strategy']}-k{job['consortia_size']}-{digest}"
+
+
+def write_run_manifest(
+    profile: Mapping[str, Any],
+    jobs: Sequence[Mapping[str, Any]],
+    run_id: str,
+    output_path: Path,
+) -> Path:
+    manifest = {
+        "schema_version": 1,
+        "profile": profile["name"],
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expected_scenarios": int(profile["data"]["expected_scenarios"]),
+        "jobs": [
+            {"job_key": job_key(job), "settings": dict(job)}
+            for job in jobs
+        ],
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+    return output_path
 
 
 def expand_grid(grid: Mapping[str, Sequence[Any]]) -> list[dict[str, Any]]:
@@ -353,9 +398,19 @@ def solution_records(
     job: Mapping[str, Any],
     run_id: str,
     truth: Mapping[str, Sequence[str]] | None = None,
+    logical_run_runtime_seconds: float | None = None,
 ) -> list[dict[str, Any]]:
     solutions = result if isinstance(result, list) else [result]
-    return [solution_record(solution, job, run_id, truth) for solution in solutions]
+    return [
+        solution_record(
+            solution,
+            job,
+            run_id,
+            truth,
+            logical_run_runtime_seconds=logical_run_runtime_seconds,
+        )
+        for solution in solutions
+    ]
 
 
 def _json_value(value: Any) -> Any:
@@ -388,6 +443,7 @@ def solution_record(
     job: Mapping[str, Any],
     run_id: str,
     truth: Mapping[str, Sequence[str]] | None = None,
+    logical_run_runtime_seconds: float | None = None,
 ) -> dict[str, Any]:
     details = solution.details or {}
     analysis = details.get("analysis", {})
@@ -395,6 +451,7 @@ def solution_record(
     record = {
         "profile": job["profile"],
         "run_id": run_id,
+        "job_key": job_key(job),
         "strategy": job["strategy"],
         "method": solution.method,
         "scenario_index": details.get("scenario"),
@@ -404,6 +461,8 @@ def solution_record(
         "selected_names": ";".join(solution.selected_names),
         "objective": _json_value(solution.objective),
         "runtime_seconds": _json_value(details.get("runtime")),
+        "logical_run_runtime_seconds": logical_run_runtime_seconds,
+        "runtime_scope": "strategy_configuration_size_all_scenarios",
         "absence_cover_penalty": job.get("absence_cover_penalty"),
         "absence_match_reward": job.get("absence_match_reward"),
         "heuristic_mask_key": job.get("heuristic_mask_key"),
@@ -417,6 +476,9 @@ def solution_record(
         "solver_status": details.get("solver_status"),
         "solver_status_code": details.get("solver_status_code"),
         "mip_gap": details.get("mip_gap"),
+        "scenario_has_solution": details.get("scenario_has_solution", True),
+        "scenario_objective_bound": details.get("scenario_objective_bound"),
+        "scenario_mip_gap": details.get("scenario_mip_gap"),
     }
     for key, value in analysis.items():
         value = _json_value(value)
@@ -435,6 +497,7 @@ def write_summary(records: list[dict[str, Any]], output_dir: Path, prefix: str) 
     first_columns = [
         "profile",
         "run_id",
+        "job_key",
         "strategy",
         "method",
         "scenario_index",
@@ -443,6 +506,8 @@ def write_summary(records: list[dict[str, Any]], output_dir: Path, prefix: str) 
         "selected_count",
         "objective",
         "runtime_seconds",
+        "logical_run_runtime_seconds",
+        "runtime_scope",
         "absence_cover_penalty",
         "absence_match_reward",
         "heuristic_mask_key",
@@ -450,6 +515,9 @@ def write_summary(records: list[dict[str, Any]], output_dir: Path, prefix: str) 
         "solver_status",
         "solver_status_code",
         "mip_gap",
+        "scenario_has_solution",
+        "scenario_objective_bound",
+        "scenario_mip_gap",
     ]
     ordered = [column for column in first_columns if column in frame.columns]
     ordered += [column for column in frame.columns if column not in ordered]
@@ -488,7 +556,8 @@ def apply_job_overrides(
 
 
 def utc_run_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return f"{timestamp}-{uuid.uuid4().hex[:8]}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -506,6 +575,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not jobs:
         raise SystemExit("No benchmark jobs matched the requested filters.")
 
+    run_id = args.run_id or utc_run_id()
+    if args.plan_output is not None:
+        write_run_manifest(profile, jobs, run_id, args.plan_output)
+
     if args.dry_run:
         for job in jobs:
             print(job_line(job))
@@ -514,14 +587,30 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     genomes, metagenomes = load_benchmark_frames(profile)
     model = build_model(genomes, metagenomes)
-    run_id = args.run_id or utc_run_id()
     records: list[dict[str, Any]] = []
     truth = profile.get("truth")
     for job in jobs:
+        logical_start = time.perf_counter()
         result = run_job(model, genomes, metagenomes, job)
-        records.extend(solution_records(result, job, run_id, truth))
+        logical_runtime = time.perf_counter() - logical_start
+        records.extend(
+            solution_records(
+                result,
+                job,
+                run_id,
+                truth,
+                logical_run_runtime_seconds=logical_runtime,
+            )
+        )
 
-    output_dir = args.output_dir or OUTPUTS_ROOT / args.profile / "results"
+    output_dir = args.output_dir or OUTPUTS_ROOT / args.profile / run_id / "results"
+    manifest_path = (
+        output_dir.parent / "manifest.json"
+        if output_dir.name == "results"
+        else output_dir / "manifest.json"
+    )
+    if args.plan_output is None and not manifest_path.exists():
+        write_run_manifest(profile, jobs, run_id, manifest_path)
     csv_path, json_path = write_summary(records, output_dir, args.summary_prefix)
     print(f"Wrote {len(records)} row(s) to {csv_path}")
     print(f"Wrote JSON summary to {json_path}")

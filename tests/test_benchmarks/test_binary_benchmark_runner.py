@@ -178,6 +178,12 @@ def test_tiny_benchmark_writes_stable_summaries(tmp_path):
     assert frame["profile"].unique().tolist() == ["tiny"]
     assert frame["selected_count"].tolist() == [2, 2, 2]
     assert "PPV/precision" in frame.columns
+    assert frame["job_key"].nunique() == 3
+    assert (frame["logical_run_runtime_seconds"] >= 0).all()
+    manifest = __import__("json").loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["run_id"] == "pytest"
+    assert len(manifest["jobs"]) == 3
+    assert set(frame["job_key"]) == {job["job_key"] for job in manifest["jobs"]}
 
 
 def test_recovery_benchmark_emits_ground_truth_columns(tmp_path):

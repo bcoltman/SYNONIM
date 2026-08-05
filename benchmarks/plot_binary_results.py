@@ -23,7 +23,7 @@ DEFAULT_HEATMAP_COMPARATOR = "MiMiC_v1"
 DEFAULT_PALETTE = ["#291f66", "#99cfff", "#00ffa1", "#ff211c", "#9624ed", "#00ad7d"]
 METRICS = [
     "objective",
-    "runtime_seconds",
+    "logical_run_runtime_seconds",
     "TPR/recall",
     "PPV/precision",
     "F1_score",
@@ -43,10 +43,18 @@ DEFAULT_HEATMAP_METRICS = [
     "PPV/precision",
     "FNR",
     "FPR",
-    "runtime_seconds",
+    "logical_run_runtime_seconds",
     "selection_jaccard",
 ]
-LOWER_IS_BETTER = {"FDR", "FNR", "FOR", "FPR", "objective_gap", "runtime_seconds"}
+LOWER_IS_BETTER = {
+    "FDR",
+    "FNR",
+    "FOR",
+    "FPR",
+    "objective_gap",
+    "runtime_seconds",
+    "logical_run_runtime_seconds",
+}
 HEURISTIC_PARAMETER_COLUMNS = [
     "absence_cover_penalty",
     "absence_match_reward",
@@ -56,6 +64,7 @@ HEURISTIC_PARAMETER_COLUMNS = [
 ]
 GROUP_COLUMNS = [
     "profile",
+    "run_id",
     "strategy",
     "method",
     OPTIMIZER_LABEL_COLUMN,
@@ -171,8 +180,11 @@ def optimizer_palette(labels: Sequence[str]) -> dict[str, Any]:
 
 
 def default_plot_output_dir(paths: Sequence[Path], results_dir: Path) -> Path:
-    if len(paths) == 1 and paths[0].parent.name == "results":
-        return paths[0].parent.parent / "plots"
+    if results_dir.name == "results":
+        return results_dir.parent / "plots"
+    parents = {path.parent for path in paths}
+    if len(parents) == 1 and next(iter(parents)).name == "results":
+        return next(iter(parents)).parent / "plots"
     return results_dir / "plots"
 
 
@@ -255,9 +267,109 @@ def load_summaries(paths: Sequence[Path]) -> pd.DataFrame:
 
 
 def default_result_paths(results_dir: Path) -> list[Path]:
-    paths = sorted(results_dir.glob("**/*binary_results.csv"))
-    paths.extend(sorted(results_dir.glob("**/*binary_results.json")))
-    return paths
+    return sorted(results_dir.glob("**/binary_*.csv"))
+
+
+def load_manifest(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    if manifest.get("schema_version") != 1:
+        raise ValueError(f"Unsupported benchmark manifest schema in {path}.")
+    return manifest
+
+
+def default_manifest_path(results_dir: Path, paths: Sequence[Path] = ()) -> Path | None:
+    candidates = {results_dir.parent / "manifest.json"}
+    candidates.update(path.parent.parent / "manifest.json" for path in paths)
+    existing = sorted(path for path in candidates if path.exists())
+    return existing[0] if len(existing) == 1 else None
+
+
+def _single_value(frame: pd.DataFrame, column: str) -> Any:
+    if column not in frame.columns:
+        raise ValueError(f"Result summaries are missing required column {column!r}.")
+    values = frame[column].dropna().unique()
+    if len(values) != 1:
+        raise ValueError(f"Result summaries contain mixed or missing {column} values.")
+    return values[0]
+
+
+def validate_results(
+    frame: pd.DataFrame,
+    manifest: Mapping[str, Any] | None,
+    *,
+    allow_incomplete: bool = False,
+) -> pd.DataFrame:
+    """Validate one benchmark run and return rows safe for plotting."""
+    frame = frame.copy()
+    run_id = str(_single_value(frame, "run_id"))
+    profile = str(_single_value(frame, "profile"))
+    for column in ("job_key", "scenario_index", "consortia_size", "selected_count"):
+        if column not in frame.columns:
+            raise ValueError(f"Result summaries are missing required column {column!r}.")
+
+    duplicate = frame.duplicated(["job_key", "scenario_index"], keep=False)
+    if duplicate.any():
+        raise ValueError(
+            f"Result summaries contain {int(duplicate.sum())} duplicate job/scenario rows."
+        )
+
+    requested = pd.to_numeric(frame["consortia_size"], errors="coerce")
+    selected = pd.to_numeric(frame["selected_count"], errors="coerce")
+    wrong_size = requested.isna() | selected.isna() | requested.ne(selected)
+    if wrong_size.any():
+        raise ValueError(
+            f"Result summaries contain {int(wrong_size.sum())} rows with an incorrect consortium size."
+        )
+
+    feasible = pd.Series(True, index=frame.index)
+    if "scenario_has_solution" in frame.columns:
+        raw = frame["scenario_has_solution"]
+        feasible = raw.map(
+            lambda value: value if isinstance(value, (bool, np.bool_)) else str(value).lower() == "true"
+        )
+        if (~feasible).any() and not allow_incomplete:
+            raise ValueError(
+                f"Result summaries contain {int((~feasible).sum())} scenarios without a feasible solution."
+            )
+
+    if manifest is None:
+        if not allow_incomplete:
+            raise ValueError(
+                "No run manifest was found; pass --manifest or use --allow-incomplete for legacy results."
+            )
+        print("Warning: validating legacy results without a manifest.", file=sys.stderr)
+        return frame.loc[feasible].copy()
+
+    if str(manifest.get("run_id")) != run_id or str(manifest.get("profile")) != profile:
+        raise ValueError("Result run/profile does not match the selected manifest.")
+    expected_scenarios = int(manifest["expected_scenarios"])
+    manifest_keys = [str(item["job_key"]) for item in manifest["jobs"]]
+    if len(manifest_keys) != len(set(manifest_keys)):
+        raise ValueError("Benchmark manifest contains duplicate logical job keys.")
+    expected = {
+        (key, scenario)
+        for key in manifest_keys
+        for scenario in range(expected_scenarios)
+    }
+    scenario_values = pd.to_numeric(frame["scenario_index"], errors="coerce")
+    if scenario_values.isna().any():
+        raise ValueError("Result summaries contain invalid scenario indices.")
+    actual = set(zip(frame["job_key"].astype(str), scenario_values.astype(int)))
+    unexpected = actual - expected
+    if unexpected:
+        raise ValueError(f"Result summaries contain {len(unexpected)} unexpected job/scenario rows.")
+    missing = expected - actual
+    if missing and not allow_incomplete:
+        raise ValueError(f"Benchmark run is incomplete: {len(missing)} expected rows are missing.")
+    if missing:
+        print(f"Warning: benchmark run is missing {len(missing)} expected rows.", file=sys.stderr)
+    if (~feasible).any():
+        print(
+            f"Warning: omitting {int((~feasible).sum())} scenarios without a feasible solution.",
+            file=sys.stderr,
+        )
+    return frame.loc[feasible].copy()
 
 
 def build_summary_table(frame: pd.DataFrame) -> pd.DataFrame:
@@ -295,6 +407,8 @@ def plot_metric(frame: pd.DataFrame, metric: str, output_path: Path) -> Path:
         raise ValueError("Result summary must include 'consortia_size' for plotting.")
 
     plot_frame = add_optimizer_labels(prepare_metric_columns(frame))
+    if metric == "logical_run_runtime_seconds" and {"run_id", "job_key"}.issubset(plot_frame.columns):
+        plot_frame = plot_frame.drop_duplicates(["run_id", "job_key"])
     plot_frame[metric] = pd.to_numeric(plot_frame[metric], errors="coerce")
     plot_frame = plot_frame.dropna(subset=["consortia_size", metric])
     if plot_frame.empty:
@@ -342,7 +456,7 @@ def plot_metric(frame: pd.DataFrame, metric: str, output_path: Path) -> Path:
         size=3,
         ax=ax,
     )
-    if metric == "runtime_seconds" and (plot_frame[metric] > 0).all():
+    if metric in {"runtime_seconds", "logical_run_runtime_seconds"} and (plot_frame[metric] > 0).all():
         ax.set_yscale("log")
     ax.set_xlabel("Consortia size")
     ax.set_ylabel(metric)
@@ -417,6 +531,8 @@ def build_relative_performance_table(
     for metric in metrics:
         numeric[metric] = pd.to_numeric(numeric[metric], errors="coerce")
 
+    runtime_metric = "logical_run_runtime_seconds"
+    quality_metrics = [metric for metric in metrics if metric != runtime_metric]
     rows: list[dict[str, Any]] = []
     group_columns = relative_index_columns(numeric)
     grouped = numeric.groupby(group_columns, dropna=False) if group_columns else [((), numeric)]
@@ -424,12 +540,33 @@ def build_relative_performance_table(
         reference = group[group[OPTIMIZER_LABEL_COLUMN] == comparator]
         if reference.empty:
             continue
-        reference_values = reference.loc[:, metrics].mean(numeric_only=True)
+        reference_values = reference.loc[:, quality_metrics].mean(numeric_only=True)
         for _, row in group.iterrows():
             relative = {OPTIMIZER_LABEL_COLUMN: row[OPTIMIZER_LABEL_COLUMN]}
-            for metric in metrics:
+            for metric in quality_metrics:
                 relative[metric] = relative_ratio(row[metric], reference_values[metric])
             rows.append(relative)
+
+    if runtime_metric in metrics:
+        timing = numeric.drop_duplicates(["run_id", "job_key"])
+        timing_groups = [
+            column
+            for column in ("profile", "run_id", "consortia_size")
+            if column in timing.columns
+        ]
+        grouped_timing = timing.groupby(timing_groups, dropna=False) if timing_groups else [((), timing)]
+        for _, group in grouped_timing:
+            reference = group[group[OPTIMIZER_LABEL_COLUMN] == comparator]
+            if reference.empty:
+                continue
+            reference_runtime = reference[runtime_metric].mean()
+            for _, row in group.iterrows():
+                rows.append(
+                    {
+                        OPTIMIZER_LABEL_COLUMN: row[OPTIMIZER_LABEL_COLUMN],
+                        runtime_metric: relative_ratio(row[runtime_metric], reference_runtime),
+                    }
+                )
 
     if not rows:
         raise ValueError(f"No comparable groups contained comparator {comparator!r}.")
@@ -730,6 +867,12 @@ def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description="Summarize or plot binary benchmark results.")
     cli.add_argument("paths", nargs="*", type=Path, help="CSV or JSON result summaries.")
     cli.add_argument("--results-dir", type=Path, default=RESULTS_ROOT)
+    cli.add_argument("--manifest", type=Path)
+    cli.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Plot partial or legacy results after warning about missing data.",
+    )
     cli.add_argument("--output-dir", type=Path)
     cli.add_argument("--plot-kind", choices=["metric", "relative-heatmap", "heuristic-parameters"], default="metric")
     cli.add_argument("--metric", default="F1_score")
@@ -748,6 +891,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"No result summaries found under {args.results_dir}.")
 
     frame = load_summaries(paths)
+    manifest_path = args.manifest or default_manifest_path(args.results_dir, paths)
+    manifest = load_manifest(manifest_path) if manifest_path is not None else None
+    frame = validate_results(frame, manifest, allow_incomplete=args.allow_incomplete)
     output_dir = args.output_dir or default_plot_output_dir(paths, args.results_dir)
     table = build_summary_table(frame)
     summary_path = write_summary_table(table, output_dir / args.summary_name)

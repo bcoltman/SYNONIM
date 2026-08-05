@@ -100,9 +100,10 @@ python benchmarks/run_binary_optimizers.py \
   --heuristic-mask-key ma0-mp0-mi0
 ```
 
-The runner writes CSV and JSON summaries to
-`benchmarks/outputs/<profile>/results/`. Plot outputs for the same profile live
-beside them in `benchmarks/outputs/<profile>/plots/`.
+The runner creates a unique run ID and writes CSV and JSON summaries to
+`benchmarks/outputs/<profile>/<run-id>/results/`. Its manifest records the exact
+logical-job matrix expected in that run. Plot outputs live in the sibling
+`plots/` directory.
 It does not write raw solution pickles; keep large raw result bundles outside source
 control and convert them into small summaries for plotting.
 
@@ -118,7 +119,7 @@ Build a summary table and plot a metric:
 
 ```bash
 python benchmarks/plot_binary_results.py \
-  benchmarks/outputs/tiny/results/binary_results.csv \
+  --results-dir benchmarks/outputs/tiny/<run-id>/results \
   --metric F1_score
 ```
 
@@ -126,7 +127,7 @@ Plot relative performance against the explicit `MiMiC_v1` baseline:
 
 ```bash
 python benchmarks/plot_binary_results.py \
-  benchmarks/outputs/medium/results/binary_results.csv \
+  --results-dir benchmarks/outputs/medium/<run-id>/results \
   --plot-kind relative-heatmap
 ```
 
@@ -136,13 +137,15 @@ one of the newer heuristic parameter combinations:
 
 ```bash
 python benchmarks/plot_binary_results.py \
-  benchmarks/outputs/medium/results/binary_results.csv \
+  --results-dir benchmarks/outputs/medium/<run-id>/results \
   --plot-kind heuristic-parameters \
   --metric F1_score
 ```
 
-The plotting script reads the current CSV/JSON summaries produced by
-`run_binary_optimizers.py`.
+The plotting script discovers CSV summaries only, validates them against the run
+manifest, and fails if results are missing, duplicated, mixed across runs, have
+the wrong selected consortium size, or contain an infeasible solver scenario.
+Use `--allow-incomplete` only to inspect a partial or legacy run.
 
 Plots use consortia size on the x-axis and box scenario-level rows for each
 optimizer configuration rather than averaging everything within the broad
@@ -159,8 +162,14 @@ jobs remain separate per size so each receives the historical wall-time budget.
 The full `large` profile therefore submits 85 jobs:
 
 ```bash
-benchmarks/slurm/submit_binary_profile.sh large --strategy heuristic
+benchmarks/slurm/submit_binary_profile.sh large
 ```
+
+The launcher prints the generated run ID and plotting command. All jobs in the
+submission share that ID and write beneath
+`benchmarks/outputs/large/<run-id>/`; the manifest expects 481 logical runs and
+3,848 scenario rows. Genetic and MILP filenames include their consortium size,
+so independently scheduled jobs cannot overwrite one another.
 
 Use `--consortia-size` when you want to submit only a selected size. Otherwise,
 the job evaluates every size defined for that strategy in the profile.
@@ -170,9 +179,14 @@ variables for local setup:
 
 ```bash
 export SYNONIM_BENCHMARK_SETUP_COMMAND='module load python; source /path/to/env/bin/activate'
-export SYNONIM_BENCHMARK_OUTPUT_DIR=/path/to/profile/results
+export SYNONIM_BENCHMARK_OUTPUT_DIR=/path/to/benchmark-output-root
 benchmarks/slurm/submit_binary_profile.sh large --strategy genetic
 ```
+
+`SYNONIM_BENCHMARK_OUTPUT_DIR` is the base directory; the launcher always adds
+`<run-id>/results`, `<run-id>/logs`, and `<run-id>/manifest.json`. Set
+`SYNONIM_BENCHMARK_RUN_ID` to a new filesystem-safe value only when a predictable
+ID is required. Existing run directories are never reused.
 
 Default resources preserve the historical settings:
 
@@ -192,6 +206,12 @@ to seconds and overrides the profile's solver limit with exactly 80% of that
 allocation. The remaining 20% is reserved for setup, heuristic warm starts,
 result processing, and shutdown. Direct local runs continue to use the profile
 limit unless `--time-limit` is supplied explicitly.
+
+Cross-method timing uses `logical_run_runtime_seconds`: wall time for one
+strategy/configuration/consortium-size invocation across all scenarios. Scenario
+rows share that value, and plotting counts it once per logical job. The older
+optimizer-reported `runtime_seconds` remains in summaries for diagnostics but is
+not used by default comparisons.
 
 ## Local Artifacts
 

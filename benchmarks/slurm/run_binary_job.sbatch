@@ -21,12 +21,25 @@ ARGS=(
   --profile "${SYNONIM_BENCHMARK_PROFILE}"
   --strategy "${SYNONIM_BENCHMARK_STRATEGY}"
   --output-dir "${SYNONIM_BENCHMARK_OUTPUT_DIR:-${REPO_ROOT}/benchmarks/outputs/${SYNONIM_BENCHMARK_PROFILE}/results}"
+  --run-id "${SYNONIM_BENCHMARK_RUN_ID:?Set SYNONIM_BENCHMARK_RUN_ID for an isolated benchmark submission.}"
 )
+
+if [[ -n "${SYNONIM_BENCHMARK_PROFILES_PATH:-}" ]]; then
+  ARGS+=(--profiles-path "${SYNONIM_BENCHMARK_PROFILES_PATH}")
+fi
 
 IFS=',' read -r -a CONSORTIA_SIZES <<< "${SYNONIM_BENCHMARK_CONSORTIA_SIZES}"
 for size in "${CONSORTIA_SIZES[@]}"; do
   ARGS+=(--consortia-size "${size}")
 done
+
+if [[ "${SYNONIM_BENCHMARK_STRATEGY}" == "genetic" || "${SYNONIM_BENCHMARK_STRATEGY}" == "milp" ]]; then
+  if (( ${#CONSORTIA_SIZES[@]} != 1 )); then
+    echo "${SYNONIM_BENCHMARK_STRATEGY} jobs require exactly one consortium size." >&2
+    exit 2
+  fi
+  summary_prefix="${summary_prefix}_k${CONSORTIA_SIZES[0]}"
+fi
 
 if [[ -n "${SYNONIM_BENCHMARK_ACP:-}" ]]; then
   ARGS+=(--absence-cover-penalty "${SYNONIM_BENCHMARK_ACP}")

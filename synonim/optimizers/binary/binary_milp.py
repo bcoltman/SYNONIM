@@ -56,6 +56,15 @@ def _finite_model_float(model: gp.Model, attribute: str) -> Optional[float]:
     return value if np.isfinite(value) else None
 
 
+def _scenario_gap(objective: Optional[float], bound: Optional[float]) -> Optional[float]:
+    if objective is None or bound is None:
+        return None
+    difference = abs(bound - objective)
+    if objective == 0:
+        return 0.0 if difference == 0 else None
+    return difference / abs(objective)
+
+
 class BinaryMILP(BinaryOptimizer):
     """
     MILP optimizer with support for multi-level taxonomy constraints.
@@ -408,18 +417,19 @@ class BinaryMILP(BinaryOptimizer):
         
         for scenario in range(s):
             self.model_gp.Params.ScenarioNumber = scenario
-            obj_val = self.model_gp.ScenNObjVal
+            obj_val = _finite_model_float(self.model_gp, "ScenNObjVal")
+            obj_bound = _finite_model_float(self.model_gp, "ScenNObjBound")
+            has_solution = obj_val is not None
             
             sol_count = self.model_gp.SolCount  # Total number of pool solutions
             
-            if obj_val == -np.inf:
+            if not has_solution:
                 logger.warning(f"No objective value for scenario: {scenario}")
-                # If the scenario yields no feasible solution, return a zero-vector.
                 x_sol = np.zeros(self.G.shape[1])
+                analysis_metrics = {}
             else:
                 x_sol = x_var.ScenNX  # Retrieve the binary decision vector for the current scenario.
-            
-            analysis_metrics = self.analyze_solution(self.M[:, scenario], x_sol)
+                analysis_metrics = self.analyze_solution(self.M[:, scenario], x_sol)
             elapsed_time = time.time() - start_time
             
             sol = Solution(name=self.metagenome_names[scenario],
@@ -431,6 +441,9 @@ class BinaryMILP(BinaryOptimizer):
                            details={"scenario": scenario,
                                     "runtime":elapsed_time,
                                     "analysis": analysis_metrics,
+                                    "scenario_has_solution": has_solution,
+                                    "scenario_objective_bound": obj_bound,
+                                    "scenario_mip_gap": _scenario_gap(obj_val, obj_bound),
                                     **solver_details}
                           )
             

@@ -12,11 +12,46 @@ if [[ -z "${PROFILE}" ]]; then
 fi
 shift || true
 
+FILTER_ARGS=("$@")
+PROFILES_PATH=""
+index=0
+while (( index < ${#FILTER_ARGS[@]} )); do
+  option="${FILTER_ARGS[${index}]}"
+  case "${option}" in
+    --strategy|--consortia-size|--absence-cover-penalty|--absence-match-reward|--heuristic-mask-key|--profiles-path)
+      if (( index + 1 >= ${#FILTER_ARGS[@]} )); then
+        echo "Missing value for ${option}." >&2
+        exit 2
+      fi
+      if [[ "${option}" == "--profiles-path" ]]; then
+        PROFILES_PATH="${FILTER_ARGS[$((index + 1))]}"
+      fi
+      index=$((index + 2))
+      ;;
+    *)
+      echo "Unsupported launcher option '${option}'. Use profile filtering options only." >&2
+      exit 2
+      ;;
+  esac
+done
+
 RUNNER="${REPO_ROOT}/benchmarks/run_binary_optimizers.py"
 SBATCH_SCRIPT="${SCRIPT_DIR}/run_binary_job.sbatch"
-OUTPUT_DIR="${SYNONIM_BENCHMARK_OUTPUT_DIR:-${REPO_ROOT}/benchmarks/outputs/${PROFILE}/results}"
-LOG_DIR="$(pwd)/logs"
-mkdir -p "${LOG_DIR}"
+RUN_ID="${SYNONIM_BENCHMARK_RUN_ID:-$(date -u +%Y%m%dT%H%M%S%NZ)-$$}"
+if [[ ! "${RUN_ID}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Invalid benchmark run ID '${RUN_ID}'." >&2
+  exit 2
+fi
+OUTPUT_ROOT="${SYNONIM_BENCHMARK_OUTPUT_DIR:-${REPO_ROOT}/benchmarks/outputs/${PROFILE}}"
+RUN_DIR="${OUTPUT_ROOT}/${RUN_ID}"
+OUTPUT_DIR="${RUN_DIR}/results"
+LOG_DIR="${RUN_DIR}/logs"
+MANIFEST_PATH="${RUN_DIR}/manifest.json"
+if [[ -e "${RUN_DIR}" ]]; then
+  echo "Benchmark run directory already exists: ${RUN_DIR}" >&2
+  exit 2
+fi
+mkdir -p "${LOG_DIR}" "${OUTPUT_DIR}"
 
 slurm_time_to_seconds() {
   local value="$1"
@@ -103,6 +138,7 @@ declare -A GROUP_SIZES
 declare -A GROUP_SEEN
 GROUP_ORDER=()
 
+DRY_RUN_OUTPUT="$(python "${RUNNER}" --profile "${PROFILE}" --run-id "${RUN_ID}" --plan-output "${MANIFEST_PATH}" --dry-run "${FILTER_ARGS[@]}")"
 while IFS= read -r line; do
   [[ -z "${line}" ]] && continue
   [[ "${line}" =~ ^[0-9]+[[:space:]]job\(s\)$ ]] && continue
@@ -136,7 +172,7 @@ while IFS= read -r line; do
   else
     GROUP_SIZES["${key}"]="${size}"
   fi
-done < <(python "${RUNNER}" --profile "${PROFILE}" --dry-run "$@")
+done <<< "${DRY_RUN_OUTPUT}"
 
 for key in "${GROUP_ORDER[@]}"; do
   IFS='|' read -r strategy acp amr mask group_size <<< "${key}"
@@ -177,31 +213,49 @@ for key in "${GROUP_ORDER[@]}"; do
     name="${name}-k${group_size}"
   fi
   suffix=""
-  extra_exports=""
+  EXPORTS=(
+    "SYNONIM_BENCHMARK_REPO_ROOT=${REPO_ROOT}"
+    "SYNONIM_BENCHMARK_PROFILE=${PROFILE}"
+    "SYNONIM_BENCHMARK_STRATEGY=${strategy}"
+    "SYNONIM_BENCHMARK_CONSORTIA_SIZES=${GROUP_SIZES[${key}]}"
+    "SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR}"
+    "SYNONIM_BENCHMARK_PROCESSES=${cpus}"
+    "SYNONIM_BENCHMARK_RUN_ID=${RUN_ID}"
+  )
+  if [[ -n "${PROFILES_PATH}" ]]; then
+    EXPORTS+=("SYNONIM_BENCHMARK_PROFILES_PATH=${PROFILES_PATH}")
+  fi
   if [[ -n "${gurobi_time_limit}" ]]; then
-    extra_exports="${extra_exports},SYNONIM_BENCHMARK_GUROBI_TIME_LIMIT=${gurobi_time_limit}"
+    EXPORTS+=("SYNONIM_BENCHMARK_GUROBI_TIME_LIMIT=${gurobi_time_limit}")
   fi
   if [[ -n "${acp}" ]]; then
     name="${name}-acp${acp}"
-    extra_exports="${extra_exports},SYNONIM_BENCHMARK_ACP=${acp}"
+    EXPORTS+=("SYNONIM_BENCHMARK_ACP=${acp}")
   fi
   if [[ -n "${amr}" ]]; then
     name="${name}-amr${amr}"
-    extra_exports="${extra_exports},SYNONIM_BENCHMARK_AMR=${amr}"
+    EXPORTS+=("SYNONIM_BENCHMARK_AMR=${amr}")
   fi
   if [[ -n "${mask}" ]]; then
     name="${name}-${mask}"
     suffix="_${mask}"
-    extra_exports="${extra_exports},SYNONIM_BENCHMARK_HEURISTIC_MASK_KEY=${mask},SYNONIM_BENCHMARK_NAME_SUFFIX=${suffix}"
+    EXPORTS+=(
+      "SYNONIM_BENCHMARK_HEURISTIC_MASK_KEY=${mask}"
+      "SYNONIM_BENCHMARK_NAME_SUFFIX=${suffix}"
+    )
   fi
 
-  sbatch \
+  env "${EXPORTS[@]}" sbatch \
     --job-name="${name}" \
     --cpus-per-task="${cpus}" \
     --mem="${mem}" \
     --time="${time_limit}" \
     --output="${LOG_DIR}/%x-%j.out" \
     --error="${LOG_DIR}/%x-%j.err" \
-    --export="ALL,SYNONIM_BENCHMARK_REPO_ROOT=${REPO_ROOT},SYNONIM_BENCHMARK_PROFILE=${PROFILE},SYNONIM_BENCHMARK_STRATEGY=${strategy},SYNONIM_BENCHMARK_CONSORTIA_SIZES=${GROUP_SIZES[${key}]},SYNONIM_BENCHMARK_OUTPUT_DIR=${OUTPUT_DIR},SYNONIM_BENCHMARK_PROCESSES=${cpus}${extra_exports}" \
+    --export=ALL \
     "${SBATCH_SCRIPT}"
 done
+
+echo "Submitted benchmark run ${RUN_ID}"
+echo "Results: ${OUTPUT_DIR}"
+echo "Plot: python ${REPO_ROOT}/benchmarks/plot_binary_results.py --results-dir ${OUTPUT_DIR}"
