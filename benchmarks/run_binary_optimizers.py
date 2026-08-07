@@ -293,9 +293,15 @@ def run_mimic_v1(model: Any, job: Mapping[str, Any]):
             selected_indices.append(selected_index)
             match_counts.append(best_match)
 
-            matched_features = remaining_genomes[:, selected_index] & remaining_target
+            # Upstream MiMiC removes every Pfam present in the selected genome
+            # from the remaining reference genomes.  Only the intersection
+            # with the metagenome is removed from the target; genome-only Pfams
+            # still contribute to the selected genome's mismatch count, but
+            # must not be available to subsequent selections.
+            selected_features = remaining_genomes[:, selected_index].copy()
+            matched_features = selected_features & remaining_target
             remaining_target[matched_features] = False
-            remaining_genomes[matched_features, :] = False
+            remaining_genomes[selected_features, :] = False
             remaining_genomes[:, selected_index] = False
 
         x_opt = np.zeros(G.shape[1], dtype=int)
