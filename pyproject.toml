@@ -38,7 +38,7 @@ Source = "https://github.com/bcoltman/synonim"
 Tracker = "https://github.com/bcoltman/synonim/issues"
 
 [project.optional-dependencies]
-dev = ["pytest", "black", "isort", "mypy"]
+dev = ["pytest", "black", "isort", "mypy", "matplotlib", "seaborn"]
 milp = ["gurobipy"]
 benchmark = ["matplotlib", "seaborn"]
 
