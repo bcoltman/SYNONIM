@@ -77,3 +77,16 @@ def test_equivalent_heuristic_requires_matching_mimic_f1():
     assert plotter.equivalent_heuristic_matches(frame, sizes=[1])
     frame.loc[frame["job_key"] == "equivalent", "F1_score"] = 0.51
     assert not plotter.equivalent_heuristic_matches(frame, sizes=[1])
+
+
+def test_metrics_plot_writes_png_and_pdf(tmp_path):
+    frame = plotter.conference_labels(complete_candidates())
+    frame["conference_label"] = frame["optimizer_label"].map({
+        "MiMiC_v1": "MiMiC",
+        "BH_MP_MI_AMR-0_ACP-1": "Heuristic_v2",
+        "BG_ACP-1_AMR-1": "Genetic",
+        "BM_ACP-1_AMR-1": "MILP",
+    })
+    output = plotter.plot_conference_metrics(frame, tmp_path / "metrics.png")
+    assert output.exists()
+    assert output.with_suffix(".pdf").exists()
