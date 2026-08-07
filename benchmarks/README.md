@@ -147,12 +147,94 @@ manifest, and fails if results are missing, duplicated, mixed across runs, have
 the wrong selected consortium size, or contain an infeasible solver scenario.
 Use `--allow-incomplete` only to inspect a partial or legacy run.
 
+For a compact conference figure using the historical subset (actual MiMiC,
+MiMiC-equivalent, Heuristic v2, one genetic configuration, and one MILP
+configuration), run:
+
+```bash
+python benchmarks/plot_binary_conference.py \
+  --results-dir benchmarks/outputs/large/<run-id>/results
+```
+
+This writes PNG/PDF metric and relative-performance figures, the selected rows,
+and `optimizer_selection_audit.csv` beneath the run's `conference_plots/`
+directory. The audit ranks all heuristic, genetic, and MILP configurations by
+mean F1, then mean recall and precision, over the requested sizes. The historical
+subset remains fixed for the figure so the audit can be reported separately.
+
 Plots use consortia size on the x-axis and box scenario-level rows for each
 optimizer configuration rather than averaging everything within the broad
 heuristic/genetic/MILP classes. Labels use `MiMiC_v1` for the original baseline
 and the compact historical style: `BH` for binary heuristic, `BG` for binary
 genetic, `BM` for binary MILP, with mask flags
 and ACP/AMR settings appended where relevant.
+
+## Upstream MiMiC comparison
+
+The local `MiMiC_v1` runner is retained as `MiMiC` in plots. To compare it with
+the upstream implementation, clone MiMiC outside this repository. The upstream
+repository documents the PiBC binary-vector example data and its four-step
+workflow at <https://github.com/ClavelLab/MiMiC>.
+
+The benchmark comparison starts at upstream Step 4: the checked-in benchmark
+already contains Pfam binary matrices, so Steps 1--3 (raw contig annotation with
+Prodigal/HMMER and Pfam-vector generation) are not rerun. This avoids changing
+the input data being benchmarked.
+
+`uv` can provide the Python interpreter used by the wrapper, but it cannot
+install R or `Rscript`. Install those in a separate Conda/Mamba environment
+(or use a system R installation). For example, the Step 4 script used here
+requires the following R packages:
+
+```bash
+mamba create -n synonim-mimic-r -c conda-forge \
+  r-base r-optparse r-tidyverse r-ggsignif r-cowplot r-rcolorbrewer \
+  r-ggcorrplot r-vegan r-ade4 r-colorspace r-plyr r-data.table \
+  r-ggplot2 r-inflection r-dplyr r-readr r-reshape2
+```
+
+Activate that environment (or prepend its `bin` directory to `PATH`) before
+running the following commands in order. `PRODIGAL` and `HMMSCAN` are only
+needed for MiMiC's earlier raw-sequence steps, which this comparison skips.
+
+```bash
+MIMIC_ROOT=/path/to/MiMiC
+MIMIC_OUT=/path/to/external-mimic-pibc
+
+git clone https://github.com/ClavelLab/MiMiC.git "$MIMIC_ROOT"
+git -C "$MIMIC_ROOT" rev-parse HEAD
+
+benchmarks/external_mimic/run_mimic_pibc.sh \
+  --mimic-repo "$MIMIC_ROOT" \
+  --output-dir "$MIMIC_OUT" \
+  --iterations 30
+```
+
+The wrapper does not clone or install anything. It verifies that the upstream
+PiBC vectors match the local fixtures (111 genomes, 17,929 features, and the
+first eight metagenome scenarios), runs upstream `step_4_mimic.R`, and converts
+the ordered selections into `mimic_actual_results.csv`. A failed identity check
+stops before R is run. The output also records the upstream commit and the
+identity report.
+
+MiMiC produces an ordered design rather than fixed-size benchmark rows. The
+converter evaluates its ordered prefixes at the `large` profile sizes and
+retains rows only when the upstream design contains enough selected genomes.
+Metrics use the same binary coverage and F1 definitions as the SYNONIM runner.
+
+To add upstream MiMiC to the conference plots, first complete a SYNONIM large
+run, then pass the converted CSV to the conference plotter:
+
+```bash
+python benchmarks/plot_binary_conference.py \
+  --results-dir benchmarks/outputs/large/<run-id>/results \
+  --external-results "$MIMIC_OUT/mimic_actual_results.csv"
+```
+
+The resulting figures retain the local `MiMiC` column and add a separate
+`MiMiC_actual` column, followed by the existing MiMiC-equivalent, heuristic,
+genetic, and MILP columns. External rows are validated separately from the
+local manifest, so adding them cannot hide missing or duplicated local jobs.
 
 ## SLURM
 
