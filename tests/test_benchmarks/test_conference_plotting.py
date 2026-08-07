@@ -90,3 +90,19 @@ def test_metrics_plot_writes_png_and_pdf(tmp_path):
     output = plotter.plot_conference_metrics(frame, tmp_path / "metrics.png")
     assert output.exists()
     assert output.with_suffix(".pdf").exists()
+
+
+def test_relative_heatmap_writes_png_and_pdf(tmp_path):
+    table = pd.DataFrame(
+        {
+            "MiMiC": [1.0, 1.0, 1.0],
+            "MiMiC_actual": [1.01, 0.98, 1.2],
+            "Heuristic_v2": [1.05, 0.95, 0.8],
+            "Genetic": [1.1, 0.9, 0.6],
+            "MILP": [1.2, 0.85, 0.4],
+        },
+        index=["F1_score", "FPR", "logical_run_runtime_seconds"],
+    )
+    output = plotter.plot_conference_heatmap(table, tmp_path / "heatmap.png")
+    assert output.exists()
+    assert output.with_suffix(".pdf").exists()
