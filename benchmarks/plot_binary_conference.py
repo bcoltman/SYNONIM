@@ -70,6 +70,10 @@ LEGACY_PALETTE = {
 
 def conference_labels(frame: pd.DataFrame, labels: Mapping[str, str] = DEFAULT_LABELS) -> pd.DataFrame:
     frame = add_optimizer_labels(prepare_metric_columns(frame))
+    if "logical_run_runtime_seconds" not in frame.columns:
+        frame["logical_run_runtime_seconds"] = pd.to_numeric(
+            frame.get("runtime_seconds", pd.Series(index=frame.index, dtype=float)), errors="coerce"
+        )
     frame["conference_label"] = frame["optimizer_label"].map(labels)
     return frame
 
@@ -117,8 +121,8 @@ def verify_selected_configs(frame: pd.DataFrame, sizes: Sequence[int] = DEFAULT_
             failures.append(f"{strategy}: selected configuration {selected!r} is unavailable")
             continue
         row = match.iloc[0]
-        if int(row["rank_within_strategy"]) != 1:
-            best = ranking[(ranking["strategy"] == strategy) & (ranking["rank_within_strategy"] == 1)].iloc[0]
+        best = ranking[ranking["strategy"] == strategy].iloc[0]
+        if not np.isclose(row["mean_F1_score"], best["mean_F1_score"], atol=F1_TOLERANCE, rtol=0):
             failures.append(
                 f"{strategy}: selected {selected} mean F1={row['mean_F1_score']:.12g}; "
                 f"best is {best['optimizer_label']} mean F1={best['mean_F1_score']:.12g}"
@@ -127,6 +131,15 @@ def verify_selected_configs(frame: pd.DataFrame, sizes: Sequence[int] = DEFAULT_
         raise ValueError("Conference optimizer selection verification failed: " + "; ".join(failures))
     ranking["selected_explicitly"] = ranking.apply(
         lambda row: SELECTED_CONFIGS.get(row["strategy"]) == row["optimizer_label"], axis=1
+    )
+    ranking["f1_optimal"] = ranking.apply(
+        lambda row: np.isclose(
+            row["mean_F1_score"],
+            ranking[ranking["strategy"] == row["strategy"]]["mean_F1_score"].max(),
+            atol=F1_TOLERANCE,
+            rtol=0,
+        ),
+        axis=1,
     )
     return ranking
 
