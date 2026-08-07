@@ -236,6 +236,13 @@ The resulting figures retain the local `MiMiC` column and add a separate
 genetic, and MILP columns. External rows are validated separately from the
 local manifest, so adding them cannot hide missing or duplicated local jobs.
 
+Before writing the figures, the plotter audits every available heuristic,
+genetic, and MILP configuration across the plotted consortium sizes. The
+explicit conference selections must be tied for the highest mean F1 in their
+optimizer class; otherwise plotting stops and reports the better configuration.
+The optional MiMiC-equivalent heuristic is included only when its F1 values
+match SYNONIM MiMiC v1 for every comparable scenario and size.
+
 ## SLURM
 
 Submit one SLURM job per strategy/configuration. MiMiC v1 and heuristic jobs
